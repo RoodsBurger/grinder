@@ -308,6 +308,9 @@ class TouchScreen:
         try:
             if self.bus:
                 self.bus.close()
-            GPIO.cleanup()
+            # Don't call GPIO.cleanup() - other components (display, motor) still use GPIO
+            # Just cleanup our specific pins
+            GPIO.setup(self.TP_RST, GPIO.IN)
+            GPIO.setup(self.TP_INT, GPIO.IN)
         except:
             pass

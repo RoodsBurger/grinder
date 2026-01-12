@@ -188,9 +188,13 @@ class LCD_1inch28:
                 self.spi.open(self.spi_bus, self.spi_device)
                 self.spi.max_speed_hz = 60000000
                 self.spi.mode = 0b00
-        except:
-            # If check fails, force reopen anyway
-            self.spi.close()
+        except (AttributeError, OSError) as e:
+            # SPI connection lost or corrupted - force reinit
+            print(f"SPI error: {e}, reinitializing...")
+            try:
+                self.spi.close()
+            except:
+                pass
             self.spi.open(self.spi_bus, self.spi_device)
             self.spi.max_speed_hz = 60000000
             self.spi.mode = 0b00

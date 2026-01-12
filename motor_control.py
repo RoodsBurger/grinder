@@ -2,11 +2,15 @@ import time
 import math
 import subprocess
 import os
+import RPi.GPIO as GPIO
 from PIL import Image, ImageDraw, ImageFont
 
 # Import display and touch drivers
 from lcd_display import LCD_1inch28
 from touch_screen import TouchScreen
+
+# Hardware pins
+SLEEP_PIN = 7  # Motor driver sleep pin
 
 # --- CONFIGURATION ---
 MIN_RPM = 0
@@ -19,7 +23,8 @@ CENTER = (W_REAL // 2, H_REAL // 2)
 # Geometry
 RADIUS_OUTER = 110
 RADIUS_INNER = 85
-BUTTON_RADIUS = 45  # Button area
+BUTTON_RADIUS = 45  # Visual button area
+BUTTON_TAP_RADIUS = 40  # Smaller detection area for precise taps
 
 # Angles
 START_ANGLE = 135
@@ -49,8 +54,7 @@ def is_on_button(x, y):
     dx = x - (W_REAL // 2)
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
-    # Button is actually smaller than visual radius for more precise detection
-    return dist <= 40  # Smaller than BUTTON_RADIUS for precise tap detection
+    return dist <= BUTTON_TAP_RADIUS
 
 def get_slider_rpm(x, y):
     """Get RPM from slider position, return None if not on slider"""
@@ -58,7 +62,7 @@ def get_slider_rpm(x, y):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Must be outside button area
+    # Must be outside button area (use visual radius)
     if dist < BUTTON_RADIUS:
         return None
 
@@ -159,11 +163,7 @@ def stop_motor_process(proc):
 
     # CRITICAL: Disable motor driver via sleep pin after killing subprocess
     # The subprocess leaves GPIO pins in their last state, motor stays enabled
-    import RPi.GPIO as GPIO
-    SLEEP_PIN = 7  # Motor driver sleep pin
     try:
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(SLEEP_PIN, GPIO.OUT)
         GPIO.output(SLEEP_PIN, GPIO.LOW)  # Disable motor driver
         print("Motor driver disabled via sleep pin")
     except Exception as e:
@@ -172,6 +172,12 @@ def stop_motor_process(proc):
 # --- MAIN LOOP ---
 
 def main():
+    # Initialize GPIO for motor sleep pin control
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    GPIO.setup(SLEEP_PIN, GPIO.OUT)
+    GPIO.output(SLEEP_PIN, GPIO.LOW)  # Start with motor disabled
+
     # Initialize display and touch
     disp = LCD_1inch28()
     disp.init_display()
@@ -278,6 +284,11 @@ def main():
     finally:
         if motor_proc:
             stop_motor_process(motor_proc)
+        # Ensure motor is disabled
+        try:
+            GPIO.output(SLEEP_PIN, GPIO.LOW)
+        except:
+            pass
         disp.module_exit()
         touch.cleanup()
         print("Done")

@@ -6,8 +6,18 @@ No display, no touch - just motor operation
 import sys
 import time
 import os
+import signal
 import RPi.GPIO as GPIO
 from pololu_lib import HighPowerStepperDriver
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+def signal_handler(signum, frame):
+    """Handle SIGTERM/SIGINT for graceful deceleration"""
+    global shutdown_requested
+    shutdown_requested = True
+    print(f"Signal {signum} received, decelerating...")
 
 # Hardware Pins
 SCS_PIN = 8
@@ -20,7 +30,13 @@ MOTOR_DIRECTION = 1
 
 def run_motor(target_rpm):
     """Run motor at target RPM until process is killed"""
+    global shutdown_requested
+
     print(f"Motor process starting at {target_rpm} RPM (PID: {os.getpid()})")
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
     # Initialize motor driver
     driver = HighPowerStepperDriver(
@@ -47,9 +63,10 @@ def run_motor(target_rpm):
     steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
-    # Acceleration profile
+    # Acceleration profile (also used for deceleration)
     accel_time = 2.0
     accel_profile = driver.calculate_accel_profile(target_rpm, accel_time, steps_rev)
+    decel_profile = list(reversed(accel_profile))
 
     print(f"Motor running: {len(accel_profile)} accel steps, cruise delay {cruise_delay*1000:.3f}ms")
 
@@ -60,10 +77,14 @@ def run_motor(target_rpm):
     gpio_low = GPIO.LOW
 
     t_next = time.perf_counter()
+    step_count = 0
 
     try:
-        # Acceleration
+        # Acceleration phase
         for delay in accel_profile:
+            if shutdown_requested:
+                break
+
             gpio_out(step_pin, gpio_high)
             t_pulse = time.perf_counter()
             while time.perf_counter() - t_pulse < 0.000002: pass
@@ -71,9 +92,10 @@ def run_motor(target_rpm):
 
             t_next += delay
             while time.perf_counter() < t_next: pass
+            step_count += 1
 
-        # Cruise forever (until killed)
-        while True:
+        # Cruise phase (until shutdown requested)
+        while not shutdown_requested:
             gpio_out(step_pin, gpio_high)
             t_pulse = time.perf_counter()
             while time.perf_counter() - t_pulse < 0.000002: pass
@@ -81,6 +103,20 @@ def run_motor(target_rpm):
 
             t_next += cruise_delay
             while time.perf_counter() < t_next: pass
+            step_count += 1
+
+        # Deceleration phase (graceful shutdown)
+        if shutdown_requested:
+            print(f"Decelerating after {step_count} steps...")
+            for delay in decel_profile:
+                gpio_out(step_pin, gpio_high)
+                t_pulse = time.perf_counter()
+                while time.perf_counter() - t_pulse < 0.000002: pass
+                gpio_out(step_pin, gpio_low)
+
+                t_next += delay
+                while time.perf_counter() < t_next: pass
+                step_count += 1
 
     except KeyboardInterrupt:
         print("Motor process interrupted")
@@ -88,7 +124,7 @@ def run_motor(target_rpm):
         # Disable via sleep pin
         if driver.sleep_pin:
             GPIO.output(driver.sleep_pin, GPIO.LOW)
-        print("Motor disabled")
+        print(f"Motor disabled ({step_count} total steps)")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
