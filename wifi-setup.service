@@ -1,0 +1,24 @@
+[Unit]
+Description=One-time WiFi Setup at Boot
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/motor-control/wifi_setup.py
+RemainAfterExit=yes
+TimeoutStartSec=90
+
+# Run as root
+User=root
+Group=root
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wifi-setup
+
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

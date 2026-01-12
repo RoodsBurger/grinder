@@ -1,0 +1,26 @@
+[Unit]
+Description=Motor Control UI Application
+After=wifi-setup.service
+Wants=wifi-setup.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/motor-control/motor_control.py
+Restart=always
+RestartSec=5
+
+# Run as root (needed for GPIO)
+User=root
+Group=root
+
+WorkingDirectory=/opt/motor-control
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=motor-control
+
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
