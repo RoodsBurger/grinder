@@ -328,6 +328,10 @@ def run_motor_loop(driver, target_rpm, touch):
         if faults['any_fault']:
             print(f"Final status: {driver.get_fault_description(faults)}")
 
+        # CRITICAL: Close motor SPI immediately to release bus for display
+        driver.close()
+        print("Motor SPI closed")
+
 
 def main():
     # Initialize display and touch (always active)
@@ -375,20 +379,20 @@ def main():
                             driver.set_step_mode(32)            # Set to 1/32 Microstepping
 
                             # Show running UI
+                            # NOTE: Motor driver is on same SPI bus, must reset speed before every draw
+                            disp.reset_spi_speed()
                             draw_ui(disp, rpm, is_running=True)
 
                             # Run motor (blocking until stop pressed)
+                            # Motor SPI will be closed inside run_motor_loop()
                             run_motor_loop(driver, rpm, touch)
 
-                            # Clean up motor driver completely
-                            driver.close()  # Close SPI (releases bus)
+                            # Clean up motor driver object
                             del driver
                             print("Motor driver cleaned up")
 
-                            # CRITICAL: Reset display SPI speed (motor set it to 500kHz)
-                            disp.reset_spi_speed()
-
                             # Return to UI-only mode
+                            disp.reset_spi_speed()
                             draw_ui(disp, rpm, is_running=False)
 
                 time.sleep(0.01)
