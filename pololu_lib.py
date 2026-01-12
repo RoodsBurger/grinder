@@ -95,6 +95,12 @@ class HighPowerStepperDriver:
             pass
 
     def _write_reg(self, address, value):
+        """Write to DRV8711 register with error handling."""
+        if address < 0 or address > 7:
+            raise ValueError(f"Invalid register address: {address}")
+        if value < 0 or value > 0xFFF:
+            raise ValueError(f"Invalid register value: {value} (must be 0-4095)")
+
         self.regs[address] = value
         cmd_msb = ((address & 0x07) << 4) | ((value >> 8) & 0x0F)
         cmd_lsb = value & 0xFF
@@ -102,14 +108,22 @@ class HighPowerStepperDriver:
         if self.cs_pin: GPIO.output(self.cs_pin, GPIO.HIGH) # CS Active (High)
         try:
             self.spi.xfer2([cmd_msb, cmd_lsb])
+        except Exception as e:
+            raise IOError(f"SPI write failed: {e}")
         finally:
             if self.cs_pin: GPIO.output(self.cs_pin, GPIO.LOW) # CS Inactive (Low)
 
     def _read_reg(self, address):
+        """Read from DRV8711 register with error handling."""
+        if address < 0 or address > 7:
+            raise ValueError(f"Invalid register address: {address}")
+
         cmd_msb = (1 << 7) | ((address & 0x07) << 4)
         if self.cs_pin: GPIO.output(self.cs_pin, GPIO.HIGH)
         try:
             result = self.spi.xfer2([cmd_msb, 0x00])
+        except Exception as e:
+            raise IOError(f"SPI read failed: {e}")
         finally:
             if self.cs_pin: GPIO.output(self.cs_pin, GPIO.LOW)
         return ((result[0] & 0x0F) << 8) | result[1]
@@ -129,6 +143,9 @@ class HighPowerStepperDriver:
 
     def set_current_milliamps(self, current_ma):
         """Sets current limit based on 36v4 30mOhm resistors."""
+        if current_ma < 0 or current_ma > 8000:
+            raise ValueError(f"Current {current_ma}mA out of range (0-8000mA)")
+
         r_sense = 0.030
         gains = [(5, 0), (10, 1), (20, 2), (40, 3)]
 
@@ -182,6 +199,64 @@ class HighPowerStepperDriver:
     def read_status(self):
         return self._read_reg(REG_STATUS)
 
+    def check_thermal_fault(self):
+        """
+        Check if driver is in thermal shutdown.
+        Returns: True if overtemperature detected, False otherwise.
+        """
+        status = self.read_status()
+        ots_bit = (status >> 7) & 0x01  # Bit 7: OTS
+        return ots_bit == 1
+
+    def check_all_faults(self):
+        """
+        Check all fault conditions in STATUS register.
+        Returns: dict with fault flags and raw status value.
+
+        STATUS Register bits (DRV8711):
+        Bit 7: OTS  - OverTemperature Shutdown
+        Bit 6: AOCP - Channel A Overcurrent
+        Bit 5: BOCP - Channel B Overcurrent
+        Bit 4: APDF - Channel A Predriver Fault
+        Bit 3: BPDF - Channel B Predriver Fault
+        Bit 2: UVLO - Undervoltage Lockout
+        Bit 1: STD  - Stall Detected
+        Bit 0: STDLAT - Stall Detected Latched
+        """
+        status = self.read_status()
+        # Only consider critical faults (bits 2-7), ignore stall detection (bits 0-1) as it can be noisy
+        critical_faults = status & 0xFC  # Mask bits 2-7 only
+        return {
+            'raw_status': status,
+            'ots_thermal': bool((status >> 7) & 0x01),
+            'overcurrent_a': bool((status >> 6) & 0x01),
+            'overcurrent_b': bool((status >> 5) & 0x01),
+            'predriver_fault_a': bool((status >> 4) & 0x01),
+            'predriver_fault_b': bool((status >> 3) & 0x01),
+            'undervoltage': bool((status >> 2) & 0x01),
+            'stall_detected': bool((status >> 1) & 0x01),
+            'stall_latched': bool(status & 0x01),
+            'any_fault': critical_faults != 0  # Only critical faults trigger shutdown
+        }
+
+    def get_fault_description(self, faults):
+        """
+        Convert fault dict to human-readable string.
+        Args: faults dict from check_all_faults()
+        Returns: String describing active faults, or "No faults" if clean.
+        """
+        if not faults['any_fault']:
+            return "No faults"
+
+        msgs = []
+        if faults['ots_thermal']: msgs.append("THERMAL SHUTDOWN")
+        if faults['overcurrent_a'] or faults['overcurrent_b']: msgs.append("OVERCURRENT")
+        if faults['predriver_fault_a'] or faults['predriver_fault_b']: msgs.append("PREDRIVER FAULT")
+        if faults['undervoltage']: msgs.append("UNDERVOLTAGE")
+        if faults['stall_detected']: msgs.append("STALL")
+
+        return " | ".join(msgs) + f" (0x{faults['raw_status']:03X})"
+
     def _calculate_delay(self, rpm, step_delay, steps_per_rev):
         """Internal helper to calculate delay from RPM."""
         delay = 0.001 # Default safe delay
@@ -195,6 +270,118 @@ class HighPowerStepperDriver:
              delay = step_delay
 
         return delay
+
+    def calculate_accel_profile(self, target_rpm, accel_time, steps_per_rev=200):
+        """
+        Calculate trapezoidal acceleration profile.
+
+        Args:
+            target_rpm: Target speed in RPM
+            accel_time: Time to reach target speed (seconds)
+            steps_per_rev: Motor steps per revolution (default 200)
+
+        Returns:
+            List of delays (seconds) for each step during acceleration phase.
+            Use reversed list for deceleration.
+        """
+        microsteps = 1 << self.step_mode_val
+        target_steps_per_sec = (target_rpm * steps_per_rev * microsteps) / 60.0
+
+        if target_steps_per_sec <= 0 or accel_time <= 0:
+            return []
+
+        target_delay = 1.0 / target_steps_per_sec
+
+        # Simple linear ramp
+        # Start from 10x slower, ramp to target speed
+        start_delay = target_delay * 10
+        num_steps = int(accel_time * target_steps_per_sec / 5)  # Ramp over ~20% of time
+
+        if num_steps < 10:
+            num_steps = 10  # Minimum ramp steps
+
+        delays = []
+        for i in range(num_steps):
+            ratio = i / float(num_steps)
+            delay = start_delay - (start_delay - target_delay) * ratio
+            delays.append(delay)
+
+        return delays
+
+    def move_steps_with_accel(self, steps, direction, rpm, accel_time=0.5, steps_per_rev=200):
+        """
+        Move with trapezoidal acceleration/deceleration.
+
+        Args:
+            steps: Total steps to move
+            direction: 1 (forward) or 0 (reverse)
+            rpm: Target speed in RPM
+            accel_time: Time to accelerate/decelerate (seconds)
+            steps_per_rev: Motor steps per revolution
+        """
+        if steps < 50:
+            # Too short for acceleration, use constant speed
+            return self.move_steps(steps, direction, rpm=rpm, steps_per_rev=steps_per_rev)
+
+        # Calculate acceleration profile
+        accel_profile = self.calculate_accel_profile(rpm, accel_time, steps_per_rev)
+        decel_profile = list(reversed(accel_profile))
+
+        accel_steps = len(accel_profile)
+        decel_steps = len(decel_profile)
+        cruise_steps = steps - accel_steps - decel_steps
+
+        # Adjust if not enough steps for full profile
+        if cruise_steps < 0:
+            accel_steps = steps // 2
+            decel_steps = steps - accel_steps
+            accel_profile = accel_profile[:accel_steps]
+            decel_profile = decel_profile[-decel_steps:]
+            cruise_steps = 0
+
+        # Calculate cruise delay
+        cruise_delay = self._calculate_delay(rpm, None, steps_per_rev)
+
+        # Set direction
+        if self.dir_pin:
+            GPIO.output(self.dir_pin, GPIO.HIGH if direction else GPIO.LOW)
+
+        if not self.step_pin:
+            return
+
+        # Optimize GPIO calls
+        output = GPIO.output
+        step_pin = self.step_pin
+        high = GPIO.HIGH
+        low = GPIO.LOW
+
+        step_count = 0
+
+        # Acceleration phase
+        for delay in accel_profile:
+            output(step_pin, high)
+            time.sleep(0.000002)
+            output(step_pin, low)
+            time.sleep(delay)
+            step_count += 1
+
+        # Cruise phase
+        for _ in range(cruise_steps):
+            output(step_pin, high)
+            time.sleep(0.000002)
+            output(step_pin, low)
+            time.sleep(cruise_delay)
+            step_count += 1
+
+        # Deceleration phase
+        for delay in decel_profile:
+            output(step_pin, high)
+            time.sleep(0.000002)
+            output(step_pin, low)
+            time.sleep(delay)
+            step_count += 1
+
+        return step_count
 
     def move_steps(self, steps, direction, rpm=None, step_delay=None, steps_per_rev=200):
         """
