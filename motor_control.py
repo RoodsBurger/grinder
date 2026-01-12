@@ -230,8 +230,6 @@ def main():
     print("- Touch center = start/stop motor")
     print("- Touch outer ring = set RPM (5 RPM steps)")
 
-    last_slider_update = 0  # Throttle slider updates
-
     try:
         while True:
             try:
@@ -240,32 +238,18 @@ def main():
                     if touch.read_touch():
                         x, y = touch.get_point()
 
-                        # Enable detailed debug for first few touches after motor runs
-                        enable_debug = motor_proc is None  # Debug when motor not running
-                        action = map_touch(x, y, debug=enable_debug)
-
-                        # Summary output
-                        if action is None:
-                            if enable_debug:
-                                print(f"Touch at ({x},{y}) → IGNORED (outside active area)")
-                        elif action == "BUTTON":
-                            print(f"Detected: BUTTON at ({x},{y}), motor_proc={'running' if motor_proc else 'None'}")
-                        else:
-                            print(f"Detected: SLIDER RPM={action} at ({x},{y}), motor_proc={'running' if motor_proc else 'None'}")
+                        # Disable debug output (too verbose)
+                        action = map_touch(x, y, debug=False)
 
                         # Slider - change RPM immediately (only when motor not running)
                         if isinstance(action, int):
                             if motor_proc is None:
                                 if action != rpm:
-                                    # Throttle updates to prevent flooding
-                                    now = time.time()
-                                    if now - last_slider_update > 0.1:  # Max 10 updates/sec
-                                        rpm = action
-                                        print(f"→ RPM: {rpm}")
-                                        draw_ui(disp, rpm, is_running=False)
-                                        last_slider_update = now
-                            else:
-                                print(f"  (slider ignored - motor running)")
+                                    # No throttling - immediate response like original
+                                    rpm = action
+                                    print(f"RPM: {rpm}")
+                                    draw_ui(disp, rpm, is_running=False)
+                            # Silently ignore slider while motor running (no spam)
 
                         # Button - toggle motor
                         elif action == "BUTTON":
