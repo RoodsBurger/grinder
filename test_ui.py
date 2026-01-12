@@ -64,7 +64,7 @@ def preload_resources():
     except:
         CACHED_FONT = None
 
-    # Pre-render START icon (whole coffee beans)
+    # Pre-render START icon (whole coffee beans with vertical grooves)
     icon_img = Image.new('RGBA', (ICON_SIZE*2, ICON_SIZE*2), (0, 0, 0, 0))
     draw = ImageDraw.Draw(icon_img)
 
@@ -73,27 +73,29 @@ def preload_resources():
     spacing = ICON_SIZE * 0.25
     center_x = ICON_SIZE
     center_y = ICON_SIZE
+    groove_width = int(2.5 * SCALE)
+    groove_h = bean_h * 0.7
 
-    # Left bean
+    # Left bean (straight, no tilt)
     left_x = center_x - spacing
     draw.ellipse([left_x - bean_w, center_y - bean_h,
                  left_x + bean_w, center_y + bean_h],
                 fill=COL_TEXT)
-    # Bean groove (curved line on white bean)
-    groove_w = bean_w * 0.8
-    draw.arc([left_x - groove_w, center_y - bean_h*0.6,
-             left_x + groove_w, center_y + bean_h*0.6],
-            start=20, end=160, fill=COL_BTN_GO, width=int(3*SCALE))
+    # Vertical groove
+    draw.arc([left_x - bean_w*0.3, center_y - groove_h,
+             left_x + bean_w*0.3, center_y + groove_h],
+            start=75, end=105, fill=COL_BTN_GO, width=groove_width)
 
-    # Right bean
+    # Right bean (tilted ~20 degrees)
     right_x = center_x + spacing
-    draw.ellipse([right_x - bean_w, center_y - bean_h,
-                 right_x + bean_w, center_y + bean_h],
+    tilt_offset = 12 * SCALE  # ~20 degree tilt
+    draw.ellipse([right_x - bean_w, center_y - bean_h - tilt_offset,
+                 right_x + bean_w, center_y + bean_h + tilt_offset],
                 fill=COL_TEXT)
-    # Bean groove
-    draw.arc([right_x - groove_w, center_y - bean_h*0.6,
-             right_x + groove_w, center_y + bean_h*0.6],
-            start=20, end=160, fill=COL_BTN_GO, width=int(3*SCALE))
+    # Vertical groove (tilted with bean)
+    draw.arc([right_x - bean_w*0.3, center_y - groove_h,
+             right_x + bean_w*0.3, center_y + groove_h],
+            start=75, end=105, fill=COL_BTN_GO, width=groove_width)
 
     ICON_START = icon_img
 
