@@ -294,8 +294,8 @@ class HighPowerStepperDriver:
         target_delay = 1.0 / target_steps_per_sec
 
         # Simple linear ramp
-        # Start from 20x slower, ramp to target speed
-        start_delay = target_delay * 20
+        # Start from 5x slower, ramp to target speed
+        start_delay = target_delay * 5
         num_steps = int(accel_time * target_steps_per_sec / 2)  # Ramp over ~50% of time
 
         if num_steps < 10:
