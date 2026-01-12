@@ -367,6 +367,9 @@ def main():
     rpm = 200
     draw_ui(disp, rpm, is_running=False)
 
+    # Track touch state for detecting new presses
+    was_touched = False
+
     # Build display cache for performance
     print("Building display cache...")
     try:
@@ -400,10 +403,13 @@ def main():
     try:
         while True:
             try:
-                if touch.is_touched():
+                currently_touched = touch.is_touched()
+
+                if currently_touched:
                     if touch.read_touch():
                         x, y = touch.get_point()
-                        is_new_press = touch.is_new_press()
+                        # New press = transition from not touched to touched
+                        is_new_press = not was_touched
                         action = map_touch(x, y, rpm, is_new_press)
 
                         if isinstance(action, int):
@@ -415,6 +421,12 @@ def main():
                             draw_ui_fast(disp, rpm, is_running=True)
                             run_motor_loop(driver, rpm, touch)
                             draw_ui_fast(disp, rpm, is_running=False)
+                            was_touched = False  # Reset after motor loop
+                            continue
+
+                        was_touched = True
+                else:
+                    was_touched = False
 
                 time.sleep(0.01)
 
