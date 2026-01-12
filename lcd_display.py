@@ -41,7 +41,7 @@ class LCD_1inch28:
 
         # Initialize SPI
         self.spi.open(self.spi_bus, self.spi_device)
-        self.spi.max_speed_hz = 60000000  # 60MHz (GC9A01 supports up to 60MHz)
+        self.spi.max_speed_hz = 80000000  # 80MHz (GC9A01 max spec)
         self.spi.mode = 0b00  # SPI Mode 0
 
         # Turn on backlight
@@ -180,7 +180,7 @@ class LCD_1inch28:
             try:
                 self.spi.close()
                 self.spi.open(self.spi_bus, self.spi_device)
-                self.spi.max_speed_hz = 60000000
+                self.spi.max_speed_hz = 80000000
                 self.spi.mode = 0b00
                 self.spi_corrupted = False
             except Exception as e:
