@@ -381,9 +381,12 @@ def main():
                             run_motor_loop(driver, rpm, touch)
 
                             # Clean up motor driver completely
-                            driver.close()  # Close SPI and cleanup GPIO
+                            driver.close()  # Close SPI (releases bus)
                             del driver
                             print("Motor driver cleaned up")
+
+                            # CRITICAL: Reset display SPI speed (motor set it to 500kHz)
+                            disp.reset_spi_speed()
 
                             # Return to UI-only mode
                             draw_ui(disp, rpm, is_running=False)
