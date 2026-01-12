@@ -178,16 +178,21 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
-        # CRITICAL: Close and reopen SPI on EVERY frame
-        # Motor subprocess permanently corrupts kernel SPI state
-        # This is the ONLY way to guarantee 60MHz speed
+        # Check SPI speed and only reopen if corrupted
         try:
-            self.spi.close()
-            self.spi.open(self.spi_bus, self.spi_device)
+            # Try to set speed
             self.spi.max_speed_hz = 60000000
-            self.spi.mode = 0b00
+
+            # Verify it actually changed (readback test)
+            if self.spi.max_speed_hz != 60000000:
+                # Speed is stuck - must reopen
+                print(f"SPI stuck at {self.spi.max_speed_hz}Hz, reopening...")
+                self.spi.close()
+                self.spi.open(self.spi_bus, self.spi_device)
+                self.spi.max_speed_hz = 60000000
+                self.spi.mode = 0b00
         except Exception as e:
-            print(f"SPI reinit error: {e}")
+            print(f"SPI error: {e}")
 
         if image.mode != 'RGB':
             image = image.convert('RGB')

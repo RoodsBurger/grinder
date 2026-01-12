@@ -184,8 +184,8 @@ class TouchScreen:
         """
         current_time = time.time()
 
-        # Debounce check - don't read too frequently
-        if current_time - self.last_touch_time < self.debounce_time:
+        # Minimal debounce - only skip if called too rapidly (< 10ms)
+        if current_time - self.last_touch_time < 0.01:
             return False
 
         # Try reading with retry logic
@@ -214,11 +214,8 @@ class TouchScreen:
                     # Apply filtering
                     filtered_x, filtered_y = self.filter_coordinates(x, y)
 
-                    # Check hysteresis - only report if movement is significant
-                    if self.touch_state == self.STATE_HELD:
-                        if not self.check_hysteresis(filtered_x, filtered_y):
-                            # Movement too small, ignore
-                            return False
+                    # Disable hysteresis check - we want immediate response for slider
+                    # (Original code had no hysteresis and worked fine)
 
                     # Update state
                     self.x = filtered_x

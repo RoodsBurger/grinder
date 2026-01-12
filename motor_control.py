@@ -51,7 +51,7 @@ def get_angle(x, y):
     deg = math.degrees(math.atan2(dy, dx))
     return (deg + 360) % 360
 
-def map_touch(x, y):
+def map_touch(x, y, debug=False):
     """
     Map touch to action - SIMPLE AND IMMEDIATE like original
     Returns: "BUTTON" or RPM integer or None
@@ -60,8 +60,13 @@ def map_touch(x, y):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
+    if debug:
+        print(f"  map_touch: ({x},{y}) -> dist={dist:.1f}px from center")
+
     # Button in center (45px for precision)
     if dist < 45:
+        if debug:
+            print(f"    → BUTTON (dist < 45px)")
         return "BUTTON"
 
     # Slider - calculate RPM from angle
@@ -70,13 +75,20 @@ def map_touch(x, y):
     if eff_angle < 135:
         eff_angle += 360
 
+    if debug:
+        print(f"    angle={angle:.1f}°, eff_angle={eff_angle:.1f}°")
+
     start, end = 135, 405
     if start <= eff_angle <= end:
         ratio = (eff_angle - start) / (end - start)
         rpm_value = MIN_RPM + ratio * (MAX_RPM - MIN_RPM)
-        # Round to nearest 5 RPM
-        return int(round(rpm_value / 5) * 5)
+        rpm_rounded = int(round(rpm_value / 5) * 5)
+        if debug:
+            print(f"    → SLIDER RPM={rpm_rounded} (angle in range)")
+        return rpm_rounded
 
+    if debug:
+        print(f"    → None (angle out of range)")
     return None
 
 def draw_ui(disp, rpm, is_running, animate=False):
@@ -216,11 +228,15 @@ def main():
                 if touch.is_touched():
                     if touch.read_touch():
                         x, y = touch.get_point()
-                        action = map_touch(x, y)
 
-                        # Debug: show what was detected
+                        # Enable detailed debug for first few touches after motor runs
+                        enable_debug = motor_proc is None  # Debug when motor not running
+                        action = map_touch(x, y, debug=enable_debug)
+
+                        # Summary output
                         if action is None:
-                            pass  # Outside active areas
+                            if enable_debug:
+                                print(f"Touch at ({x},{y}) → IGNORED (outside active area)")
                         elif action == "BUTTON":
                             print(f"Detected: BUTTON at ({x},{y}), motor_proc={'running' if motor_proc else 'None'}")
                         else:
