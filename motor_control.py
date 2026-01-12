@@ -327,7 +327,10 @@ def run_motor_loop(driver, target_rpm, touch, disp, video_frames=None, video_fps
             gpio_out(step_pin, gpio_low)
 
             t_next += delay
+            # Yield to video thread while maintaining timing precision
             while time.perf_counter() < t_next:
+                if (t_next - time.perf_counter()) > 0.0001:  # More than 0.1ms left
+                    time.sleep(0)  # Yield CPU to other threads
                 pass
 
             steps_count += 1
@@ -352,7 +355,10 @@ def run_motor_loop(driver, target_rpm, touch, disp, video_frames=None, video_fps
                 gpio_out(step_pin, gpio_low)
 
                 t_next += cruise_delay
+                # Yield to video thread while maintaining timing precision
                 while time.perf_counter() < t_next:
+                    if (t_next - time.perf_counter()) > 0.0001:  # More than 0.1ms left
+                        time.sleep(0)  # Yield CPU to other threads
                     pass
 
                 steps_count += 1
@@ -385,7 +391,10 @@ def run_motor_loop(driver, target_rpm, touch, disp, video_frames=None, video_fps
             gpio_out(step_pin, gpio_low)
 
             t_next += delay
+            # Yield to video thread while maintaining timing precision
             while time.perf_counter() < t_next:
+                if (t_next - time.perf_counter()) > 0.0001:  # More than 0.1ms left
+                    time.sleep(0)  # Yield CPU to other threads
                 pass
 
             steps_count += 1
