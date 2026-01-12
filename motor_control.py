@@ -381,6 +381,7 @@ def main():
                             run_motor_loop(driver, rpm, touch)
 
                             # Clean up motor driver completely
+                            driver.close()  # Close SPI and cleanup GPIO
                             del driver
                             print("Motor driver cleaned up")
 

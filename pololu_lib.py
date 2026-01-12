@@ -428,5 +428,6 @@ class HighPowerStepperDriver:
         self.move_steps(total_steps, direction, step_delay=delay)
 
     def close(self):
+        """Close SPI connection only - don't cleanup GPIO (shared with display/touch)"""
         self.spi.close()
-        GPIO.cleanup()
+        # Don't call GPIO.cleanup() - display and touch still need their pins
