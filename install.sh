@@ -38,8 +38,8 @@ mkdir -p "$INSTALL_DIR"
 echo ""
 echo "[4/7] Copying files..."
 cp "$SCRIPT_DIR/motor_control.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/motor_only.py" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/grinder_video.mp4" "$INSTALL_DIR/" 2>/dev/null || echo "WARNING: grinder_video.mp4 not found"
 
 # Copy driver files from home directory
 for f in lcd_display.py touch_screen.py pololu_lib.py; do

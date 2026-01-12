@@ -17,7 +17,6 @@ def signal_handler(signum, frame):
     """Handle SIGTERM/SIGINT for graceful deceleration"""
     global shutdown_requested
     shutdown_requested = True
-    print(f"Signal {signum} received, decelerating...")
 
 # Hardware Pins
 SCS_PIN = 8
@@ -31,8 +30,6 @@ MOTOR_DIRECTION = 1
 def run_motor(target_rpm):
     """Run motor at target RPM until process is killed"""
     global shutdown_requested
-
-    print(f"Motor process starting at {target_rpm} RPM (PID: {os.getpid()})")
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)
@@ -67,8 +64,6 @@ def run_motor(target_rpm):
     accel_time = 1.0
     accel_profile = driver.calculate_accel_profile(target_rpm, accel_time, steps_rev)
     decel_profile = list(reversed(accel_profile))
-
-    print(f"Motor running: {len(accel_profile)} accel steps, cruise delay {cruise_delay*1000:.3f}ms")
 
     # Local optimizations
     step_pin = STEP_PIN
@@ -107,7 +102,6 @@ def run_motor(target_rpm):
 
         # Deceleration phase (graceful shutdown)
         if shutdown_requested:
-            print(f"Decelerating after {step_count} steps...")
             for delay in decel_profile:
                 gpio_out(step_pin, gpio_high)
                 t_pulse = time.perf_counter()
@@ -119,12 +113,11 @@ def run_motor(target_rpm):
                 step_count += 1
 
     except KeyboardInterrupt:
-        print("Motor process interrupted")
+        pass
     finally:
         # Disable via sleep pin
         if driver.sleep_pin:
             GPIO.output(driver.sleep_pin, GPIO.LOW)
-        print(f"Motor disabled ({step_count} total steps)")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

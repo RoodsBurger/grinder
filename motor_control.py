@@ -198,8 +198,7 @@ def draw_ui(disp, rpm, is_running):
     img = img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS)
 
     disp.show_image(img)
-    elapsed = (time.time() - start_time) * 1000
-    print(f"UI render: {elapsed:.1f}ms")
+    # Removed logging for performance
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
@@ -214,28 +213,23 @@ def start_motor_process(rpm):
         stderr=subprocess.PIPE,
         text=True
     )
-    print(f"Started motor PID {proc.pid}")
     return proc
 
 def stop_motor_process(proc, disp):
     """Stop motor process and ensure motor driver is disabled"""
     if proc and proc.poll() is None:
-        print(f"Killing motor PID {proc.pid}")
         proc.terminate()
         try:
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        print(f"Motor PID {proc.pid} killed")
 
     # CRITICAL: Disable motor driver via sleep pin after killing subprocess
-    # The subprocess leaves GPIO pins in their last state, motor stays enabled
     try:
         GPIO.output(SLEEP_PIN, GPIO.LOW)  # Disable motor driver
-        print("Motor driver disabled via sleep pin")
     except Exception as e:
-        print(f"Error disabling motor: {e}")
+        print(f"ERROR: Failed to disable motor: {e}")
 
     # Mark SPI as corrupted - motor subprocess changed it to 5MHz
     disp.spi_corrupted = True
@@ -263,41 +257,31 @@ def main():
 
     draw_ui(disp, rpm, is_running=False)
 
-    print("CONTROLS:")
-    print("- Touch center = start/stop motor")
-    print("- Touch outer ring = set RPM (5 RPM steps)")
-
     try:
         while True:
             try:
-                # Simple immediate response like original
+                # Simple immediate response
                 if touch.is_touched():
                     if touch.read_touch():
                         x, y = touch.get_point()
-
-                        # Disable debug output (too verbose)
                         action = map_touch(x, y, debug=False)
 
                         # Slider - change RPM immediately (only when motor not running)
                         if isinstance(action, int):
                             if motor_proc is None:
                                 if action != rpm:
-                                    # No throttling - immediate response like original
                                     rpm = action
-                                    print(f"RPM: {rpm}")
                                     draw_ui(disp, rpm, is_running=False)
-                            # Silently ignore slider while motor running (no spam)
+                            # Silently ignore slider while motor running
 
                         # Button - toggle motor
                         elif action == "BUTTON":
                             if motor_proc is None:
                                 # START
-                                print(f"→ START {rpm} RPM")
                                 motor_proc = start_motor_process(rpm)
                                 draw_ui(disp, rpm, is_running=True)
                             else:
                                 # STOP
-                                print("→ STOP")
                                 stop_motor_process(motor_proc, disp)
                                 motor_proc = None
                                 draw_ui(disp, rpm, is_running=False)
@@ -306,20 +290,20 @@ def main():
 
                 # Check if motor crashed
                 if motor_proc and motor_proc.poll() is not None:
-                    print(f"Motor crashed with code {motor_proc.returncode}")
+                    print(f"ERROR: Motor process crashed with code {motor_proc.returncode}")
                     motor_proc = None
                     draw_ui(disp, rpm, is_running=False)
 
                 time.sleep(0.005)  # 200Hz update rate
 
             except Exception as e:
-                print(f"Loop error: {e}")
+                print(f"ERROR: Loop exception: {e}")
                 import traceback
                 traceback.print_exc()
                 time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nShutdown")
+        pass
     finally:
         if motor_proc:
             stop_motor_process(motor_proc, disp)
@@ -330,7 +314,6 @@ def main():
             pass
         disp.module_exit()
         touch.cleanup()
-        print("Done")
 
 if __name__ == "__main__":
     main()

@@ -76,12 +76,10 @@ class TouchScreen:
                 time.sleep(0.05)
 
             if device_found:
-                print("Touch controller detected: CST816T")
                 try:
-                    rev = self.read_revision()
-                    print(f"Revision: 0x{rev:02X}")
+                    self.read_revision()
                 except:
-                    print("Warning: Could not read revision")
+                    pass
 
                 self.stop_sleep()
                 return True
@@ -250,13 +248,12 @@ class TouchScreen:
                     time.sleep(self.retry_delay)
                     continue
                 else:
-                    # All retries failed
-                    print(f"Touch I2C error after {self.max_retries} retries: {e}")
+                    # All retries failed - silently fail (normal during no-touch)
                     self.touched = False
                     return False
             except Exception as e:
-                # Unexpected error
-                print(f"Touch read error: {e}")
+                # Unexpected error - report only
+                print(f"ERROR: Touch read exception: {e}")
                 self.touched = False
                 return False
 
