@@ -87,7 +87,7 @@ class HighPowerStepperDriver:
     def _setup_spi(self):
         self.spi = spidev.SpiDev()
         self.spi.open(self.spi_bus, self.spi_device)
-        self.spi.max_speed_hz = 500000  # 500kHz (DRV8711 supports up to 5MHz max)
+        self.spi.max_speed_hz = 5000000  # 5MHz (DRV8711 max rated speed)
         self.spi.mode = 0
         try:
             self.spi.no_cs = True # Disable kernel CS to allow manual toggle
