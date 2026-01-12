@@ -40,6 +40,7 @@ class LCD_1inch28:
         GPIO.setup(self.RST_PIN, GPIO.OUT)
         GPIO.setup(self.DC_PIN, GPIO.OUT)
         GPIO.setup(self.BL_PIN, GPIO.OUT)
+        GPIO.setup(self.CS_PIN, GPIO.OUT)
 
         # Initialize SPI
         self.spi.open(self.spi_bus, self.spi_device)
@@ -48,6 +49,9 @@ class LCD_1inch28:
 
         # Turn on backlight
         GPIO.output(self.BL_PIN, GPIO.HIGH)
+
+        # CS starts high (inactive)
+        GPIO.output(self.CS_PIN, GPIO.HIGH)
 
         return 0
 
@@ -72,15 +76,19 @@ class LCD_1inch28:
     def write_cmd(self, cmd):
         """Write command to display"""
         GPIO.output(self.DC_PIN, GPIO.LOW)  # Command mode
+        GPIO.output(self.CS_PIN, GPIO.LOW)  # Select chip
         self.spi.writebytes([cmd])
+        GPIO.output(self.CS_PIN, GPIO.HIGH)  # Deselect
 
     def write_data(self, data):
         """Write data byte to display"""
         GPIO.output(self.DC_PIN, GPIO.HIGH)  # Data mode
+        GPIO.output(self.CS_PIN, GPIO.LOW)  # Select chip
         if isinstance(data, int):
             self.spi.writebytes([data])
         else:
             self.spi.writebytes(data)
+        GPIO.output(self.CS_PIN, GPIO.HIGH)  # Deselect
 
     def init_display(self):
         """Initialize display with configuration sequence"""
@@ -201,13 +209,16 @@ class LCD_1inch28:
         # Set window and write data
         self.set_window(0, 0, self.width, self.height)
 
-        # Write in chunks
+        # Write in chunks - CS stays LOW for entire transfer (efficient!)
         chunk_size = 4096
         GPIO.output(self.DC_PIN, GPIO.HIGH)  # Data mode
+        GPIO.output(self.CS_PIN, GPIO.LOW)   # Select chip (once)
 
         for i in range(0, len(pixel_bytes), chunk_size):
             # Just slice the list (already converted)
             self.spi.writebytes(pixel_bytes[i:i + chunk_size])
+
+        GPIO.output(self.CS_PIN, GPIO.HIGH)  # Deselect (once)
 
     def clear(self, color=(0, 0, 0)):
         """Clear the screen with a solid color"""
