@@ -246,7 +246,6 @@ def run_motor_loop(driver, target_rpm, touch):
 
     steps_count = 0
     check_every = 50  # Check stop button every N steps
-    fault_check_every = 1000  # Check driver faults every N steps
 
     motor_phase = "ACCEL"
 
@@ -295,13 +294,7 @@ def run_motor_loop(driver, target_rpm, touch):
                         motor_phase = "DECEL"
                         break  # Exit to deceleration
 
-                # Fault check
-                if steps_count % fault_check_every == 0:
-                    faults = driver.check_all_faults()
-                    if faults['any_fault']:
-                        print(f"MOTOR FAULT: {driver.get_fault_description(faults)}")
-                        motor_phase = "DECEL"
-                        break  # Emergency deceleration
+                # Fault check disabled - SPI closed after init for display speed
 
         # === DECELERATION PHASE ===
         motor_phase = "DECEL"
@@ -322,15 +315,7 @@ def run_motor_loop(driver, target_rpm, touch):
     finally:
         driver.disable_driver()
         print(f"Motor Stopped & Disabled ({steps_count} total steps)")
-
-        # Report any faults at shutdown
-        faults = driver.check_all_faults()
-        if faults['any_fault']:
-            print(f"Final status: {driver.get_fault_description(faults)}")
-
-        # CRITICAL: Close motor SPI immediately to release bus for display
-        driver.close()
-        print("Motor SPI closed")
+        # Note: SPI already closed after init, no fault checking available
 
 
 def main():
@@ -382,11 +367,14 @@ def main():
                             driver.set_current_milliamps(1000)  # Low current for testing
                             driver.set_step_mode(32)            # Set to 1/32 Microstepping
 
-                            # 3. Run motor (blocking until stop pressed)
-                            # Motor SPI will be closed inside run_motor_loop()
+                            # CRITICAL: Close motor SPI NOW - motor loop only uses GPIO pins!
+                            driver.spi.close()
+                            print("Motor SPI closed after init - display has full speed")
+
+                            # 3. Run motor (blocking until stop pressed, GPIO only - no SPI)
                             run_motor_loop(driver, rpm, touch)
 
-                            # 4. Motor driver already closed in run_motor_loop(), just cleanup object
+                            # 4. Cleanup motor driver object (SPI already closed)
                             del driver
                             print("Motor driver cleaned up")
 
