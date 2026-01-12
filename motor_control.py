@@ -1,8 +1,6 @@
 import time
 import math
 import RPi.GPIO as GPIO
-import cv2
-import threading
 from PIL import Image, ImageDraw, ImageFont
 
 # Import your existing drivers
@@ -207,96 +205,12 @@ def draw_ui_fast(disp, rpm, is_running):
 
 # --- MAIN LOGIC ---
 
-def preload_video_frames(video_path, target_size=(240, 240)):
-    """
-    Pre-convert entire video to PIL Image frames for fast playback.
-    This eliminates real-time video decoding bottleneck.
-    """
-    frames = []
-    try:
-        cap = cv2.VideoCapture(video_path)
-
-        if not cap.isOpened():
-            print(f"Warning: Could not open video {video_path}")
-            return frames, 30
-
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30
-
-        print(f"Pre-loading video frames from {video_path}...")
-        frame_count = 0
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            # Convert BGR to RGB
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # Convert to PIL Image and resize
-            pil_image = Image.fromarray(frame_rgb)
-            pil_image = pil_image.resize(target_size, Image.Resampling.LANCZOS)
-
-            frames.append(pil_image)
-            frame_count += 1
-
-        cap.release()
-        print(f"Pre-loaded {frame_count} frames at {fps} FPS")
-
-        return frames, fps
-
-    except Exception as e:
-        print(f"Error pre-loading video: {e}")
-        return frames, 30
-
-def play_video_loop(disp, stop_event, frames, fps):
-    """
-    Play pre-loaded video frames in a loop until stop_event is set.
-    Much faster than real-time decoding!
-    """
-    if not frames:
-        print("No frames to play")
-        return
-
-    frame_delay = 1.0 / fps
-    print(f"Starting video playback at {fps} FPS")
-
-    try:
-        while not stop_event.is_set():
-            for frame in frames:
-                if stop_event.is_set():
-                    break
-
-                start_time = time.time()
-
-                # Display pre-loaded PIL Image (no decoding needed!)
-                disp.show_image(frame)
-
-                # Precise timing
-                elapsed_time = time.time() - start_time
-                if elapsed_time < frame_delay:
-                    time.sleep(frame_delay - elapsed_time)
-
-        print("Video playback stopped")
-
-    except Exception as e:
-        print(f"Video playback error: {e}")
-
-def run_motor_loop(driver, target_rpm, touch, disp, video_frames=None, video_fps=30):
+def run_motor_loop(driver, target_rpm, touch):
     """
     Blocking loop that runs the motor with acceleration/deceleration.
-    Now includes fault monitoring and graceful shutdown.
-    Plays video on display while motor runs.
+    Includes fault monitoring and graceful shutdown.
     """
     print(f"Starting Motor at {target_rpm} RPM")
-
-    # Start video playback in background thread (if frames available)
-    stop_video = threading.Event()
-    video_thread = None
-    if video_frames:
-        video_thread = threading.Thread(target=play_video_loop, args=(disp, stop_video, video_frames, video_fps))
-        video_thread.daemon = True
-        video_thread.start()
 
     # Set Direction
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
@@ -421,11 +335,6 @@ def run_motor_loop(driver, target_rpm, touch, disp, video_frames=None, video_fps
     except Exception as e:
         print(f"Motor loop error in {motor_phase} phase: {e}")
     finally:
-        # Stop video playback
-        stop_video.set()
-        if video_thread:
-            video_thread.join(timeout=1.0)
-
         driver.disable_driver()
         print(f"Motor Stopped & Disabled ({steps_count} total steps)")
 
@@ -488,14 +397,6 @@ def main():
         print(f"Warning: Cache build failed, using fallback rendering: {e}")
         disp.cache_enabled = False
 
-    # Pre-load video frames for fast playback
-    print("Pre-loading video for motor operation...")
-    video_frames, video_fps = preload_video_frames("grinder_video.mp4")
-    if video_frames:
-        print(f"Video ready: {len(video_frames)} frames")
-    else:
-        print("Warning: No video frames loaded, will run without video")
-
     try:
         while True:
             try:
@@ -512,7 +413,7 @@ def main():
 
                         elif action == "BUTTON":
                             draw_ui_fast(disp, rpm, is_running=True)
-                            run_motor_loop(driver, rpm, touch, disp, video_frames, video_fps)
+                            run_motor_loop(driver, rpm, touch)
                             draw_ui_fast(disp, rpm, is_running=False)
 
                 time.sleep(0.01)
