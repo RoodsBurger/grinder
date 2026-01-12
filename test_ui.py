@@ -64,7 +64,7 @@ def preload_resources():
     except:
         CACHED_FONT = None
 
-    # Pre-render START icon (whole coffee beans with tilted orientation)
+    # Pre-render START icon (whole coffee beans)
     icon_img = Image.new('RGBA', (ICON_SIZE*2, ICON_SIZE*2), (0, 0, 0, 0))
     draw = ImageDraw.Draw(icon_img)
 
@@ -74,29 +74,26 @@ def preload_resources():
     center_x = ICON_SIZE
     center_y = ICON_SIZE
 
-    # Left bean (tilted slightly left)
+    # Left bean
     left_x = center_x - spacing
-    left_y_offset = 8 * SCALE  # Tilt by shifting top
-    draw.ellipse([left_x - bean_w, center_y - bean_h + left_y_offset,
-                 left_x + bean_w, center_y + bean_h - left_y_offset],
+    draw.ellipse([left_x - bean_w, center_y - bean_h,
+                 left_x + bean_w, center_y + bean_h],
                 fill=COL_TEXT)
-    # Vertical groove (more realistic coffee bean groove)
-    groove_width = int(2.5 * SCALE)
-    groove_h = bean_h * 0.7
-    draw.arc([left_x - bean_w*0.3, center_y - groove_h,
-             left_x + bean_w*0.3, center_y + groove_h],
-            start=75, end=105, fill=COL_BTN_GO, width=groove_width)
+    # Bean groove (curved line on white bean)
+    groove_w = bean_w * 0.8
+    draw.arc([left_x - groove_w, center_y - bean_h*0.6,
+             left_x + groove_w, center_y + bean_h*0.6],
+            start=20, end=160, fill=COL_BTN_GO, width=int(3*SCALE))
 
-    # Right bean (tilted slightly right)
+    # Right bean
     right_x = center_x + spacing
-    right_y_offset = 8 * SCALE  # Tilt by shifting top opposite direction
-    draw.ellipse([right_x - bean_w, center_y - bean_h - right_y_offset,
-                 right_x + bean_w, center_y + bean_h + right_y_offset],
+    draw.ellipse([right_x - bean_w, center_y - bean_h,
+                 right_x + bean_w, center_y + bean_h],
                 fill=COL_TEXT)
-    # Vertical groove
-    draw.arc([right_x - bean_w*0.3, center_y - groove_h,
-             right_x + bean_w*0.3, center_y + groove_h],
-            start=75, end=105, fill=COL_BTN_GO, width=groove_width)
+    # Bean groove
+    draw.arc([right_x - groove_w, center_y - bean_h*0.6,
+             right_x + groove_w, center_y + bean_h*0.6],
+            start=20, end=160, fill=COL_BTN_GO, width=int(3*SCALE))
 
     ICON_START = icon_img
 
