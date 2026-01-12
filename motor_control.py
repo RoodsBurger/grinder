@@ -59,14 +59,31 @@ def get_angle(x, y):
     deg = math.degrees(math.atan2(dy, dx))
     return (deg + 360) % 360
 
-def map_touch(x, y, current_rpm):
-    """Map touch coordinates to UI actions"""
+def map_touch(x, y, current_rpm, is_new_press=False):
+    """
+    Map touch coordinates to UI actions.
+
+    Args:
+        x, y: Touch coordinates
+        current_rpm: Current RPM value
+        is_new_press: True if this is a new touch (not drag)
+
+    Returns:
+        "BUTTON" if center button pressed (only on new press)
+        int RPM value if touching slider
+        None otherwise
+    """
     dx = x - (W_REAL // 2)
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    if dist < 60:
+    # Button: Only trigger on NEW press (not during drag), tighter area
+    if dist < 55 and is_new_press:
         return "BUTTON"
+
+    # Slider: Only if outside button area
+    if dist < 55:
+        return None  # Ignore touches in button area during drag
 
     angle = get_angle(x, y)
     eff_angle = angle
@@ -339,7 +356,8 @@ def run_motor_loop(driver, target_rpm, touch, disp, video_frames=None, video_fps
             if steps_count % check_every == 0:
                 if touch.is_touched() and touch.read_touch():
                     x, y = touch.get_point()
-                    action = map_touch(x, y, target_rpm)
+                    is_new_press = touch.is_new_press()
+                    action = map_touch(x, y, target_rpm, is_new_press)
                     if action == "BUTTON":
                         print("Stop during acceleration")
                         motor_phase = "DECEL"
@@ -367,7 +385,8 @@ def run_motor_loop(driver, target_rpm, touch, disp, video_frames=None, video_fps
                 if steps_count % check_every == 0:
                     if touch.is_touched() and touch.read_touch():
                         x, y = touch.get_point()
-                        action = map_touch(x, y, target_rpm)
+                        is_new_press = touch.is_new_press()
+                        action = map_touch(x, y, target_rpm, is_new_press)
                         if action == "BUTTON":
                             print("Stop button pressed")
                             motor_phase = "DECEL"
@@ -483,7 +502,8 @@ def main():
                 if touch.is_touched():
                     if touch.read_touch():
                         x, y = touch.get_point()
-                        action = map_touch(x, y, rpm)
+                        is_new_press = touch.is_new_press()
+                        action = map_touch(x, y, rpm, is_new_press)
 
                         if isinstance(action, int):
                             if action != rpm:

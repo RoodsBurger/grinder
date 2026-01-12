@@ -44,14 +44,19 @@ def get_angle(x, y):
     deg = math.degrees(math.atan2(dy, dx))
     return (deg + 360) % 360
 
-def map_touch(x, y):
+def map_touch(x, y, is_new_press=False):
     """Map touch coordinates to UI actions"""
     dx = x - (W_REAL // 2)
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    if dist < 60:
+    # Button: Only trigger on NEW press (not during drag), tighter area
+    if dist < 55 and is_new_press:
         return "BUTTON"
+
+    # Slider: Only if outside button area
+    if dist < 55:
+        return None  # Ignore touches in button area during drag
 
     angle = get_angle(x, y)
     eff_angle = angle
@@ -152,7 +157,8 @@ def main():
             if touch.is_touched():
                 if touch.read_touch():
                     x, y = touch.get_point()
-                    action = map_touch(x, y)
+                    is_new_press = touch.is_new_press()
+                    action = map_touch(x, y, is_new_press)
 
                     if isinstance(action, int):
                         if action != rpm:
@@ -162,7 +168,7 @@ def main():
                             elapsed = time.time() - start
                             frame_times.append(elapsed)
                             frame_count += 1
-                            
+
                             if frame_count % 10 == 0:
                                 avg = sum(frame_times[-10:]) / 10
                                 print(f"Frame {frame_count}: {elapsed*1000:.1f}ms (avg: {avg*1000:.1f}ms, {1/avg:.1f} FPS)")
