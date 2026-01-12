@@ -132,24 +132,89 @@ def draw_ui(disp, rpm, is_running):
     disp.show_image(img)
 
 
+def draw_ui_fast(disp, rpm, is_running):
+    """
+    Fast UI rendering using pre-rendered cache.
+    Falls back to draw_ui() if cache disabled.
+    """
+    if not disp.cache_enabled:
+        return draw_ui(disp, rpm, is_running)
+
+    try:
+        # Calculate knob position
+        knob_pos = None
+        if not is_running:
+            ratio = (rpm - MIN_RPM) / (MAX_RPM - MIN_RPM)
+            active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
+            knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2
+            rad = math.radians(active_angle)
+            kx = CENTER[0] + knob_dist * math.cos(rad)
+            ky = CENTER[1] + knob_dist * math.sin(rad)
+            knob_pos = (kx, ky)
+
+        # Button color
+        btn_col = COL_BTN_STOP if is_running else COL_BTN_GO
+
+        # Text elements
+        text = "STOP" if is_running else "GO"
+        text_elements = []
+
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+            font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
+            text_elements = [
+                (text, CENTER, font, COL_TEXT),
+                (f"{rpm} RPM", (CENTER[0], CENTER[1] + 70), font_sm, (150, 150, 150))
+            ]
+        except:
+            text_elements = [(text, CENTER, None, COL_TEXT)]
+
+        # Composite and display
+        frame = disp.composite_cached_frame(
+            rpm=rpm,
+            knob_pos=knob_pos,
+            button_color=btn_col,
+            button_radius=BUTTON_RADIUS,
+            text_elements=text_elements
+        )
+
+        disp.show_image(frame)
+
+    except Exception as e:
+        # Fallback on error
+        print(f"Fast render failed, using fallback: {e}")
+        draw_ui(disp, rpm, is_running)
+
+
 # --- MAIN LOGIC ---
 
 def run_motor_loop(driver, target_rpm, touch):
     """
-    Blocking loop that runs the motor.
+    Blocking loop that runs the motor with acceleration/deceleration.
+    Now includes fault monitoring and graceful shutdown.
     """
     print(f"Starting Motor at {target_rpm} RPM")
 
-    # 1. Set Direction (The Fix)
+    # Set Direction
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
 
     driver.enable_driver()
 
-    # Calculate Step Delay
+    # Clear any previous faults
+    driver.clear_faults()
+
+    # Calculate Step Delay (for cruise phase)
     steps_rev = 200
-    microsteps = 8  # 1/32 Microstepping
+    microsteps = 1 << driver.step_mode_val  # Read actual microstepping from driver
     steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
-    delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
+    cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
+
+    # Calculate acceleration profile
+    accel_time = 0.5  # 500ms to reach full speed
+    accel_profile = driver.calculate_accel_profile(target_rpm, accel_time, steps_rev)
+    decel_profile = list(reversed(accel_profile))
+
+    print(f"Acceleration profile: {len(accel_profile)} steps over {accel_time}s")
 
     # Local optimizations
     step_pin = STEP_PIN
@@ -159,41 +224,96 @@ def run_motor_loop(driver, target_rpm, touch):
 
     steps_count = 0
     check_every = 20  # Check touch every N steps
+    fault_check_every = 1000  # Check driver faults every N steps
+
+    motor_phase = "ACCEL"  # Track current phase for debugging
 
     # Drift-correcting timer
     t_next = time.perf_counter()
 
     try:
-        while True:
-            # Step Pulse
+        # === ACCELERATION PHASE ===
+        motor_phase = "ACCEL"
+        for delay in accel_profile:
             gpio_out(step_pin, gpio_high)
-            # Short busy wait for pulse width (approx 2us)
             t_pulse = time.perf_counter()
             while time.perf_counter() - t_pulse < 0.000002: pass
             gpio_out(step_pin, gpio_low)
 
-            # Calculate next step time and busy-wait
             t_next += delay
             while time.perf_counter() < t_next:
                 pass
 
             steps_count += 1
+
+            # Check for stop during acceleration
             if steps_count % check_every == 0:
-                # Fast GPIO Check
-                if touch.is_touched():
-                    # Detailed Check
-                    if touch.read_touch():
+                if touch.is_touched() and touch.read_touch():
+                    x, y = touch.get_point()
+                    action = map_touch(x, y, target_rpm)
+                    if action == "BUTTON":
+                        print("Stop during acceleration")
+                        motor_phase = "DECEL"
+                        break  # Jump to deceleration
+
+        # === CRUISE PHASE ===
+        if motor_phase == "ACCEL":  # Only cruise if we didn't stop during accel
+            motor_phase = "CRUISE"
+            while True:
+                gpio_out(step_pin, gpio_high)
+                t_pulse = time.perf_counter()
+                while time.perf_counter() - t_pulse < 0.000002: pass
+                gpio_out(step_pin, gpio_low)
+
+                t_next += cruise_delay
+                while time.perf_counter() < t_next:
+                    pass
+
+                steps_count += 1
+
+                # Touch check
+                if steps_count % check_every == 0:
+                    if touch.is_touched() and touch.read_touch():
                         x, y = touch.get_point()
                         action = map_touch(x, y, target_rpm)
                         if action == "BUTTON":
-                            print("Stop Button Pressed")
-                            return
+                            print("Stop button pressed")
+                            motor_phase = "DECEL"
+                            break  # Exit to deceleration
+
+                # Fault check
+                if steps_count % fault_check_every == 0:
+                    faults = driver.check_all_faults()
+                    if faults['any_fault']:
+                        print(f"MOTOR FAULT: {driver.get_fault_description(faults)}")
+                        motor_phase = "DECEL"
+                        break  # Emergency deceleration
+
+        # === DECELERATION PHASE ===
+        motor_phase = "DECEL"
+        print(f"Decelerating after {steps_count} steps...")
+        for delay in decel_profile:
+            gpio_out(step_pin, gpio_high)
+            t_pulse = time.perf_counter()
+            while time.perf_counter() - t_pulse < 0.000002: pass
+            gpio_out(step_pin, gpio_low)
+
+            t_next += delay
+            while time.perf_counter() < t_next:
+                pass
+
+            steps_count += 1
 
     except Exception as e:
-        print(e)
+        print(f"Motor loop error in {motor_phase} phase: {e}")
     finally:
         driver.disable_driver()
-        print("Motor Stopped & Disabled")
+        print(f"Motor Stopped & Disabled ({steps_count} total steps)")
+
+        # Report any faults at shutdown
+        faults = driver.check_all_faults()
+        if faults['any_fault']:
+            print(f"Final status: {driver.get_fault_description(faults)}")
 
 
 def main():
@@ -213,34 +333,75 @@ def main():
     )
     driver.reset_settings()
     driver.set_current_milliamps(6500)
-    driver.set_step_mode(8)            # Set to 1/32 Microstepping
+    driver.set_step_mode(32)            # Set to 1/32 Microstepping
     driver.disable_driver()
 
     rpm = 200
     draw_ui(disp, rpm, is_running=False)
 
+    # Build display cache for performance
+    print("Building display cache...")
+    try:
+        # Build static background (track + center hole)
+        disp.build_static_background(
+            center=CENTER,
+            radius_outer=RADIUS_OUTER,
+            radius_inner=RADIUS_INNER,
+            start_angle=START_ANGLE,
+            end_angle=END_ANGLE,
+            bg_color=COL_BG,
+            track_color=COL_TRACK
+        )
+
+        # Build arc cache (0-300 RPM in 10 RPM steps)
+        disp.build_arc_cache(
+            center=CENTER,
+            radius_outer=RADIUS_OUTER,
+            start_angle=START_ANGLE,
+            end_angle=END_ANGLE,
+            active_color=COL_ACTIVE,
+            min_rpm=MIN_RPM,
+            max_rpm=MAX_RPM
+        )
+
+        print("Display cache ready")
+    except Exception as e:
+        print(f"Warning: Cache build failed, using fallback rendering: {e}")
+        disp.cache_enabled = False
+
     try:
         while True:
-            if touch.is_touched():
-                if touch.read_touch():
-                    x, y = touch.get_point()
-                    action = map_touch(x, y, rpm)
+            try:
+                if touch.is_touched():
+                    if touch.read_touch():
+                        x, y = touch.get_point()
+                        action = map_touch(x, y, rpm)
 
-                    if isinstance(action, int):
-                        if action != rpm:
-                            rpm = action
-                            draw_ui(disp, rpm, is_running=False)
+                        if isinstance(action, int):
+                            if action != rpm:
+                                rpm = action
+                                draw_ui_fast(disp, rpm, is_running=False)
 
-                    elif action == "BUTTON":
-                        draw_ui(disp, rpm, is_running=True)
-                        run_motor_loop(driver, rpm, touch)
-                        draw_ui(disp, rpm, is_running=False)
+                        elif action == "BUTTON":
+                            draw_ui_fast(disp, rpm, is_running=True)
+                            run_motor_loop(driver, rpm, touch)
+                            draw_ui_fast(disp, rpm, is_running=False)
 
-            time.sleep(0.01)
+                time.sleep(0.01)
+
+            except Exception as e:
+                print(f"Error in main loop iteration: {e}")
+                # Continue running, just log the error
+                time.sleep(0.1)  # Brief pause before retry
 
     except KeyboardInterrupt:
+        print("\nShutdown requested")
+    finally:
+        print("Cleaning up...")
         driver.disable_driver()
         disp.module_exit()
+        touch.cleanup()
+        print("Shutdown complete")
 
 if __name__ == "__main__":
     main()
