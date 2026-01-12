@@ -57,17 +57,15 @@ def get_angle(x, y):
     deg = math.degrees(math.atan2(dy, dx))
     return (deg + 360) % 360
 
-def map_touch(x, y, current_rpm, is_new_press=False):
+def map_touch(x, y):
     """
     Map touch coordinates to UI actions.
 
     Args:
         x, y: Touch coordinates
-        current_rpm: Current RPM value
-        is_new_press: True if this is a new touch (not drag)
 
     Returns:
-        "BUTTON" if center button pressed (only on new press)
+        "BUTTON" if center button pressed (smaller 45px area)
         int RPM value if touching slider
         None otherwise
     """
@@ -75,14 +73,11 @@ def map_touch(x, y, current_rpm, is_new_press=False):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Button: Only trigger on NEW press (not during drag), tighter area
-    if dist < 55 and is_new_press:
+    # Button: Smaller area (45px radius)
+    if dist < 45:
         return "BUTTON"
 
     # Slider: Only if outside button area
-    if dist < 55:
-        return None  # Ignore touches in button area during drag
-
     angle = get_angle(x, y)
     eff_angle = angle
     if eff_angle < 135: eff_angle += 360
@@ -205,10 +200,20 @@ def draw_ui_fast(disp, rpm, is_running):
 
 # --- MAIN LOGIC ---
 
+def check_stop_button(touch):
+    """Check if stop button is pressed (center area only)"""
+    if touch.is_touched() and touch.read_touch():
+        x, y = touch.get_point()
+        dx = x - (W_REAL // 2)
+        dy = y - (H_REAL // 2)
+        dist = math.sqrt(dx*dx + dy*dy)
+        return dist < 45  # Stop button pressed
+    return False
+
 def run_motor_loop(driver, target_rpm, touch):
     """
     Blocking loop that runs the motor with acceleration/deceleration.
-    Includes fault monitoring and graceful shutdown.
+    Only checks for stop button - no UI updates during operation.
     """
     print(f"Starting Motor at {target_rpm} RPM")
 
@@ -227,7 +232,7 @@ def run_motor_loop(driver, target_rpm, touch):
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
     # Calculate acceleration profile
-    accel_time = 2.0  # 2000ms to reach full speed (smoother/longer ramp)
+    accel_time = 2.0  # 2s to reach full speed
     accel_profile = driver.calculate_accel_profile(target_rpm, accel_time, steps_rev)
     decel_profile = list(reversed(accel_profile))
 
@@ -240,10 +245,10 @@ def run_motor_loop(driver, target_rpm, touch):
     gpio_low = GPIO.LOW
 
     steps_count = 0
-    check_every = 20  # Check touch every N steps
+    check_every = 50  # Check stop button every N steps
     fault_check_every = 1000  # Check driver faults every N steps
 
-    motor_phase = "ACCEL"  # Track current phase for debugging
+    motor_phase = "ACCEL"
 
     # Drift-correcting timer
     t_next = time.perf_counter()
@@ -258,24 +263,16 @@ def run_motor_loop(driver, target_rpm, touch):
             gpio_out(step_pin, gpio_low)
 
             t_next += delay
-            # Yield to video thread while maintaining timing precision
-            while time.perf_counter() < t_next:
-                if (t_next - time.perf_counter()) > 0.0001:  # More than 0.1ms left
-                    time.sleep(0)  # Yield CPU to other threads
-                pass
+            while time.perf_counter() < t_next: pass
 
             steps_count += 1
 
             # Check for stop during acceleration
             if steps_count % check_every == 0:
-                if touch.is_touched() and touch.read_touch():
-                    x, y = touch.get_point()
-                    is_new_press = touch.is_new_press()
-                    action = map_touch(x, y, target_rpm, is_new_press)
-                    if action == "BUTTON":
-                        print("Stop during acceleration")
-                        motor_phase = "DECEL"
-                        break  # Jump to deceleration
+                if check_stop_button(touch):
+                    print("Stop during acceleration")
+                    motor_phase = "DECEL"
+                    break  # Jump to deceleration
 
         # === CRUISE PHASE ===
         if motor_phase == "ACCEL":  # Only cruise if we didn't stop during accel
@@ -287,24 +284,16 @@ def run_motor_loop(driver, target_rpm, touch):
                 gpio_out(step_pin, gpio_low)
 
                 t_next += cruise_delay
-                # Yield to video thread while maintaining timing precision
-                while time.perf_counter() < t_next:
-                    if (t_next - time.perf_counter()) > 0.0001:  # More than 0.1ms left
-                        time.sleep(0)  # Yield CPU to other threads
-                    pass
+                while time.perf_counter() < t_next: pass
 
                 steps_count += 1
 
-                # Touch check
+                # Check for stop
                 if steps_count % check_every == 0:
-                    if touch.is_touched() and touch.read_touch():
-                        x, y = touch.get_point()
-                        is_new_press = touch.is_new_press()
-                        action = map_touch(x, y, target_rpm, is_new_press)
-                        if action == "BUTTON":
-                            print("Stop button pressed")
-                            motor_phase = "DECEL"
-                            break  # Exit to deceleration
+                    if check_stop_button(touch):
+                        print("Stop button pressed")
+                        motor_phase = "DECEL"
+                        break  # Exit to deceleration
 
                 # Fault check
                 if steps_count % fault_check_every == 0:
@@ -324,11 +313,7 @@ def run_motor_loop(driver, target_rpm, touch):
             gpio_out(step_pin, gpio_low)
 
             t_next += delay
-            # Yield to video thread while maintaining timing precision
-            while time.perf_counter() < t_next:
-                if (t_next - time.perf_counter()) > 0.0001:  # More than 0.1ms left
-                    time.sleep(0)  # Yield CPU to other threads
-                pass
+            while time.perf_counter() < t_next: pass
 
             steps_count += 1
 
@@ -345,6 +330,7 @@ def run_motor_loop(driver, target_rpm, touch):
 
 
 def main():
+    # Initialize display and touch (always active)
     disp = LCD_1inch28()
     disp.init_display()
 
@@ -355,78 +341,51 @@ def main():
     touch = TouchScreen()
     touch.init()
 
-    driver = HighPowerStepperDriver(
-        spi_bus=0, spi_device=0,
-        cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
-    )
-    driver.reset_settings()
-    driver.set_current_milliamps(1000)  # Low current for testing
-    driver.set_step_mode(32)            # Set to 1/32 Microstepping
-    driver.disable_driver()
-
+    # Motor driver is NOT initialized yet - only init when GO pressed
     rpm = 200
     draw_ui(disp, rpm, is_running=False)
 
-    # Track touch state for detecting new presses
-    was_touched = False
-
-    # Build display cache for performance
-    print("Building display cache...")
-    try:
-        # Build static background (track + center hole)
-        disp.build_static_background(
-            center=CENTER,
-            radius_outer=RADIUS_OUTER,
-            radius_inner=RADIUS_INNER,
-            start_angle=START_ANGLE,
-            end_angle=END_ANGLE,
-            bg_color=COL_BG,
-            track_color=COL_TRACK
-        )
-
-        # Build arc cache (0-300 RPM in 10 RPM steps)
-        disp.build_arc_cache(
-            center=CENTER,
-            radius_outer=RADIUS_OUTER,
-            start_angle=START_ANGLE,
-            end_angle=END_ANGLE,
-            active_color=COL_ACTIVE,
-            min_rpm=MIN_RPM,
-            max_rpm=MAX_RPM
-        )
-
-        print("Display cache ready")
-    except Exception as e:
-        print(f"Warning: Cache build failed, using fallback rendering: {e}")
-        disp.cache_enabled = False
+    print("UI ready - motor driver not initialized")
+    print("Touch slider to change RPM, touch center button to start")
 
     try:
         while True:
             try:
-                currently_touched = touch.is_touched()
-
-                if currently_touched:
+                if touch.is_touched():
                     if touch.read_touch():
                         x, y = touch.get_point()
-                        # New press = transition from not touched to touched
-                        is_new_press = not was_touched
-                        action = map_touch(x, y, rpm, is_new_press)
+                        action = map_touch(x, y)
 
                         if isinstance(action, int):
+                            # Slider: Change RPM
                             if action != rpm:
                                 rpm = action
-                                draw_ui_fast(disp, rpm, is_running=False)
+                                draw_ui(disp, rpm, is_running=False)
 
                         elif action == "BUTTON":
-                            draw_ui_fast(disp, rpm, is_running=True)
-                            run_motor_loop(driver, rpm, touch)
-                            draw_ui_fast(disp, rpm, is_running=False)
-                            was_touched = False  # Reset after motor loop
-                            continue
+                            # GO button: Initialize motor driver and run
+                            print(f"Initializing motor driver for {rpm} RPM...")
 
-                        was_touched = True
-                else:
-                    was_touched = False
+                            driver = HighPowerStepperDriver(
+                                spi_bus=0, spi_device=0,
+                                cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
+                            )
+                            driver.reset_settings()
+                            driver.set_current_milliamps(1000)  # Low current for testing
+                            driver.set_step_mode(32)            # Set to 1/32 Microstepping
+
+                            # Show running UI
+                            draw_ui(disp, rpm, is_running=True)
+
+                            # Run motor (blocking until stop pressed)
+                            run_motor_loop(driver, rpm, touch)
+
+                            # Clean up motor driver completely
+                            del driver
+                            print("Motor driver cleaned up")
+
+                            # Return to UI-only mode
+                            draw_ui(disp, rpm, is_running=False)
 
                 time.sleep(0.01)
 
@@ -439,7 +398,6 @@ def main():
         print("\nShutdown requested")
     finally:
         print("Cleaning up...")
-        driver.disable_driver()
         disp.module_exit()
         touch.cleanup()
         print("Shutdown complete")
