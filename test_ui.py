@@ -111,24 +111,26 @@ def draw_ui(disp, rpm, is_running):
                   CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS],
                  fill=btn_col)
 
-    # 6. Icon (coffee-themed)
+    # 6. Icon (coffee beans theme - whole vs ground)
     if is_running:
-        # Stop icon - Octagon (stop sign shape)
-        half = ICON_SIZE // 2
-        offset = half * 0.4  # For octagon corners
-        octagon = [
-            (CENTER[0] - offset, CENTER[1] - half),       # Top left
-            (CENTER[0] + offset, CENTER[1] - half),       # Top right
-            (CENTER[0] + half, CENTER[1] - offset),       # Right top
-            (CENTER[0] + half, CENTER[1] + offset),       # Right bottom
-            (CENTER[0] + offset, CENTER[1] + half),       # Bottom right
-            (CENTER[0] - offset, CENTER[1] + half),       # Bottom left
-            (CENTER[0] - half, CENTER[1] + offset),       # Left bottom
-            (CENTER[0] - half, CENTER[1] - offset),       # Left top
-        ]
-        draw.polygon(octagon, fill=COL_TEXT)
+        # Stop icon - Ground coffee (fine particles)
+        r = ICON_SIZE // 2
+        import random
+        random.seed(42)  # Consistent pattern
+        # Draw many small dots/particles to represent ground coffee
+        particle_count = 35
+        for _ in range(particle_count):
+            # Random position within icon area
+            offset_x = random.uniform(-r*0.7, r*0.7)
+            offset_y = random.uniform(-r*0.7, r*0.7)
+            particle_size = random.uniform(1*SCALE, 2.5*SCALE)
+            draw.ellipse([CENTER[0] + offset_x - particle_size,
+                         CENTER[1] + offset_y - particle_size,
+                         CENTER[0] + offset_x + particle_size,
+                         CENTER[1] + offset_y + particle_size],
+                        fill=COL_TEXT)
     else:
-        # Start icon - Coffee beans (two bean shapes)
+        # Start icon - Whole coffee beans (unground)
         bean_w = ICON_SIZE * 0.35
         bean_h = ICON_SIZE * 0.5
         spacing = ICON_SIZE * 0.25
@@ -138,7 +140,7 @@ def draw_ui(disp, rpm, is_running):
         draw.ellipse([left_x - bean_w, CENTER[1] - bean_h,
                      left_x + bean_w, CENTER[1] + bean_h],
                     fill=COL_TEXT)
-        # Bean groove (darker line)
+        # Bean groove (darker line on white bean)
         groove_w = bean_w * 0.8
         draw.arc([left_x - groove_w, CENTER[1] - bean_h*0.6,
                  left_x + groove_w, CENTER[1] + bean_h*0.6],
