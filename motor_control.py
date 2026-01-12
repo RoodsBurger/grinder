@@ -25,8 +25,9 @@ CENTER = (W_HIGH // 2, H_HIGH // 2)
 # Geometry (scaled)
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 70 * SCALE  # Thicker slider track
-BUTTON_RADIUS = 30 * SCALE  # Smaller button
+BUTTON_RADIUS = 40 * SCALE  # Button size
 KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
+ICON_SIZE = 24 * SCALE  # Icon size for play/stop
 
 # Angles
 START_ANGLE = 135
@@ -63,10 +64,10 @@ def map_touch(x, y, debug=False):
     if debug:
         print(f"  map_touch: ({x},{y}) -> dist={dist:.1f}px from center")
 
-    # Button in center (25px - small button to avoid accidental triggers)
-    if dist < 25:
+    # Button in center (35px - matches button visual size)
+    if dist < 35:
         if debug:
-            print(f"    → BUTTON (dist < 25px)")
+            print(f"    → BUTTON (dist < 35px)")
         return "BUTTON"
 
     # Slider - calculate RPM from angle
@@ -129,18 +130,55 @@ def draw_ui(disp, rpm, is_running):
                   CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS],
                  fill=btn_col)
 
-    # 6. Text (scaled)
-    try:
-        font_size = 20 * SCALE
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
-        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15 * SCALE)
+    # 6. Icon (coffee-themed)
+    if is_running:
+        # Stop icon - Octagon (stop sign shape)
+        half = ICON_SIZE // 2
+        offset = half * 0.4  # For octagon corners
+        octagon = [
+            (CENTER[0] - offset, CENTER[1] - half),       # Top left
+            (CENTER[0] + offset, CENTER[1] - half),       # Top right
+            (CENTER[0] + half, CENTER[1] - offset),       # Right top
+            (CENTER[0] + half, CENTER[1] + offset),       # Right bottom
+            (CENTER[0] + offset, CENTER[1] + half),       # Bottom right
+            (CENTER[0] - offset, CENTER[1] + half),       # Bottom left
+            (CENTER[0] - half, CENTER[1] + offset),       # Left bottom
+            (CENTER[0] - half, CENTER[1] - offset),       # Left top
+        ]
+        draw.polygon(octagon, fill=COL_TEXT)
+    else:
+        # Start icon - Coffee beans (two bean shapes)
+        bean_w = ICON_SIZE * 0.35
+        bean_h = ICON_SIZE * 0.5
+        spacing = ICON_SIZE * 0.25
 
-        text = "STOP" if is_running else "GO"
-        draw.text(CENTER, text, font=font, fill=COL_TEXT, anchor="mm")
+        # Left bean
+        left_x = CENTER[0] - spacing
+        draw.ellipse([left_x - bean_w, CENTER[1] - bean_h,
+                     left_x + bean_w, CENTER[1] + bean_h],
+                    fill=COL_TEXT)
+        # Bean groove (darker line)
+        groove_w = bean_w * 0.8
+        draw.arc([left_x - groove_w, CENTER[1] - bean_h*0.6,
+                 left_x + groove_w, CENTER[1] + bean_h*0.6],
+                start=20, end=160, fill=btn_col, width=int(3*SCALE))
+
+        # Right bean
+        right_x = CENTER[0] + spacing
+        draw.ellipse([right_x - bean_w, CENTER[1] - bean_h,
+                     right_x + bean_w, CENTER[1] + bean_h],
+                    fill=COL_TEXT)
+        # Bean groove
+        draw.arc([right_x - groove_w, CENTER[1] - bean_h*0.6,
+                 right_x + groove_w, CENTER[1] + bean_h*0.6],
+                start=20, end=160, fill=btn_col, width=int(3*SCALE))
+
+    # 7. RPM text below button
+    try:
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15 * SCALE)
         draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm} RPM", font=font_sm, fill=(150,150,150), anchor="mm")
     except:
-        text = "STOP" if is_running else "GO"
-        draw.text(CENTER, text, fill=COL_TEXT)
+        pass
 
     # 7. Downscale with anti-aliasing (LANCZOS for quality)
     img = img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS)
