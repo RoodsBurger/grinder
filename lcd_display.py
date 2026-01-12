@@ -178,6 +178,9 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
+        # CRITICAL: Always ensure 40MHz before transmission (motor driver sets to 500kHz)
+        self.spi.max_speed_hz = 40000000
+
         if image.mode != 'RGB':
             image = image.convert('RGB')
 
@@ -224,11 +227,6 @@ class LCD_1inch28:
         """Clear the screen with a solid color"""
         image = Image.new('RGB', (self.width, self.height), color)
         self.show_image(image)
-
-    def reset_spi_speed(self):
-        """Reset SPI speed to 40MHz (call after motor driver closes)"""
-        self.spi.max_speed_hz = 40000000
-        print("Display SPI speed reset to 40MHz")
 
     def build_static_background(self, center, radius_outer, radius_inner,
                                start_angle, end_angle, bg_color, track_color):

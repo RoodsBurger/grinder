@@ -378,9 +378,7 @@ def main():
                             driver.set_current_milliamps(1000)  # Low current for testing
                             driver.set_step_mode(32)            # Set to 1/32 Microstepping
 
-                            # Show running UI
-                            # NOTE: Motor driver is on same SPI bus, must reset speed before every draw
-                            disp.reset_spi_speed()
+                            # Show running UI (display auto-sets 40MHz speed)
                             draw_ui(disp, rpm, is_running=True)
 
                             # Run motor (blocking until stop pressed)
@@ -391,8 +389,7 @@ def main():
                             del driver
                             print("Motor driver cleaned up")
 
-                            # Return to UI-only mode
-                            disp.reset_spi_speed()
+                            # Return to UI-only mode (display auto-sets 40MHz speed)
                             draw_ui(disp, rpm, is_running=False)
 
                 time.sleep(0.01)
