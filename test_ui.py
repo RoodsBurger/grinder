@@ -23,9 +23,10 @@ CENTER = (W_HIGH // 2, H_HIGH // 2)
 # Geometry (scaled)
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 70 * SCALE  # Thicker slider track
-BUTTON_RADIUS = 40 * SCALE  # Button size
+BUTTON_RADIUS = 40 * SCALE  # Button size (visual)
+BUTTON_TOUCH_RADIUS = 28  # Touch detection (smaller to avoid slider conflicts)
 KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
-ICON_SIZE = 24 * SCALE  # Icon size for play/stop
+ICON_SIZE = 32 * SCALE  # Icon size (bigger)
 
 # Touch gesture thresholds
 TAP_MAX_DURATION = 0.3  # Max 300ms for tap
@@ -57,8 +58,8 @@ def map_touch(x, y):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Button: Center button
-    if dist < 35:
+    # Button: Smaller touch area to avoid slider conflicts
+    if dist < BUTTON_TOUCH_RADIUS:
         return "BUTTON"
 
     # Slider: Only if outside button area

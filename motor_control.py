@@ -25,9 +25,10 @@ CENTER = (W_HIGH // 2, H_HIGH // 2)
 # Geometry (scaled)
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 70 * SCALE  # Thicker slider track
-BUTTON_RADIUS = 40 * SCALE  # Button size
+BUTTON_RADIUS = 40 * SCALE  # Button size (visual)
+BUTTON_TOUCH_RADIUS = 28  # Touch detection (smaller to avoid slider conflicts)
 KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
-ICON_SIZE = 24 * SCALE  # Icon size for play/stop
+ICON_SIZE = 32 * SCALE  # Icon size (bigger)
 
 # Angles
 START_ANGLE = 135
@@ -64,10 +65,10 @@ def map_touch(x, y, debug=False):
     if debug:
         print(f"  map_touch: ({x},{y}) -> dist={dist:.1f}px from center")
 
-    # Button in center (35px - matches button visual size)
-    if dist < 35:
+    # Button in center (smaller detection to avoid slider conflicts)
+    if dist < BUTTON_TOUCH_RADIUS:
         if debug:
-            print(f"    → BUTTON (dist < 35px)")
+            print(f"    → BUTTON (dist < {BUTTON_TOUCH_RADIUS}px)")
         return "BUTTON"
 
     # Slider - calculate RPM from angle
