@@ -210,7 +210,7 @@ def run_motor_loop(driver, target_rpm, touch):
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
     # Calculate acceleration profile
-    accel_time = 0.5  # 500ms to reach full speed
+    accel_time = 2.0  # 2000ms to reach full speed (smoother/longer ramp)
     accel_profile = driver.calculate_accel_profile(target_rpm, accel_time, steps_rev)
     decel_profile = list(reversed(accel_profile))
 
