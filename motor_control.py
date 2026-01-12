@@ -12,14 +12,16 @@ from touch_screen import TouchScreen
 MIN_RPM = 0
 MAX_RPM = 300
 
-# Display Settings
+# High-resolution rendering for crisp graphics
+SCALE = 2  # Render at 2x resolution, downscale for anti-aliasing
 W_REAL, H_REAL = 240, 240
-CENTER = (W_REAL // 2, H_REAL // 2)
+W_HIGH, H_HIGH = W_REAL * SCALE, H_REAL * SCALE
+CENTER = (W_HIGH // 2, H_HIGH // 2)
 
-# Geometry
-RADIUS_OUTER = 110
-RADIUS_INNER = 85
-BUTTON_RADIUS = 50
+# Geometry (scaled)
+RADIUS_OUTER = 110 * SCALE
+RADIUS_INNER = 85 * SCALE
+BUTTON_RADIUS = 50 * SCALE
 
 # Angles
 START_ANGLE = 135
@@ -74,8 +76,9 @@ def map_touch(x, y):
     return None
 
 def draw_ui(disp, rpm, is_running):
-    """Draws the UI at native resolution"""
-    img = Image.new("RGB", (W_REAL, H_REAL), COL_BG)
+    """Draws the UI at high resolution with anti-aliasing"""
+    # Render at 2x resolution for smoother edges
+    img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
     draw = ImageDraw.Draw(img)
 
     # 1. Track
@@ -100,7 +103,7 @@ def draw_ui(disp, rpm, is_running):
         rad = math.radians(active_angle)
         kx = CENTER[0] + knob_dist * math.cos(rad)
         ky = CENTER[1] + knob_dist * math.sin(rad)
-        kr = 15
+        kr = 15 * SCALE
         draw.ellipse([kx-kr, ky-kr, kx+kr, ky+kr], fill=COL_KNOB)
 
     # 5. Button
@@ -109,18 +112,22 @@ def draw_ui(disp, rpm, is_running):
                   CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS],
                  fill=btn_col)
 
-    # 6. Text
+    # 6. Text (scaled)
     try:
-        font_size = 20
+        font_size = 20 * SCALE
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
-        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15 * SCALE)
 
         text = "STOP" if is_running else "GO"
         draw.text(CENTER, text, font=font, fill=COL_TEXT, anchor="mm")
-        draw.text((CENTER[0], CENTER[1] + 70), f"{rpm} RPM", font=font_sm, fill=(150,150,150), anchor="mm")
+        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm} RPM", font=font_sm, fill=(150,150,150), anchor="mm")
     except:
         text = "STOP" if is_running else "GO"
         draw.text(CENTER, text, fill=COL_TEXT)
+
+    # 7. Downscale to native resolution with high-quality LANCZOS filter (anti-aliasing)
+    if SCALE > 1:
+        img = img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS)
 
     disp.show_image(img)
 
@@ -167,9 +174,10 @@ def main():
 
     rpm = 200
     motor_proc = None  # Motor process handle
+
     draw_ui(disp, rpm, is_running=False)
 
-    print("UI ready - motor in separate process")
+    print("UI ready - rendering at 2x resolution for crisp graphics")
     print("Touch slider to change RPM, touch center button to start/stop")
 
     try:
