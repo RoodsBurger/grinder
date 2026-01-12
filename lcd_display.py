@@ -178,11 +178,22 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
-        # CRITICAL: Always ensure 60MHz before transmission (motor driver sets to 5MHz)
-        old_speed = self.spi.max_speed_hz
-        self.spi.max_speed_hz = 60000000
-        if old_speed != 60000000:
-            print(f"WARNING: Display SPI was {old_speed}Hz, reset to 60MHz")
+        # CRITICAL: Force SPI speed reset by closing and reopening
+        # Motor subprocess corrupts kernel SPI state even though it's a separate process
+        try:
+            current_speed = self.spi.max_speed_hz
+            if current_speed != 60000000:
+                print(f"WARNING: SPI was {current_speed}Hz, reopening at 60MHz")
+                self.spi.close()
+                self.spi.open(self.spi_bus, self.spi_device)
+                self.spi.max_speed_hz = 60000000
+                self.spi.mode = 0b00
+        except:
+            # If check fails, force reopen anyway
+            self.spi.close()
+            self.spi.open(self.spi_bus, self.spi_device)
+            self.spi.max_speed_hz = 60000000
+            self.spi.mode = 0b00
 
         if image.mode != 'RGB':
             image = image.convert('RGB')

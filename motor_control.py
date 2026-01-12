@@ -49,7 +49,8 @@ def is_on_button(x, y):
     dx = x - (W_REAL // 2)
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
-    return dist < BUTTON_RADIUS
+    # Button is actually smaller than visual radius for more precise detection
+    return dist <= 40  # Smaller than BUTTON_RADIUS for precise tap detection
 
 def get_slider_rpm(x, y):
     """Get RPM from slider position, return None if not on slider"""
@@ -145,7 +146,7 @@ def start_motor_process(rpm):
     return proc
 
 def stop_motor_process(proc):
-    """Stop motor process and ensure it's dead"""
+    """Stop motor process and ensure motor driver is disabled"""
     if proc and proc.poll() is None:
         print(f"Killing motor PID {proc.pid}")
         proc.terminate()
@@ -155,6 +156,18 @@ def stop_motor_process(proc):
             proc.kill()
             proc.wait()
         print(f"Motor PID {proc.pid} killed")
+
+    # CRITICAL: Disable motor driver via sleep pin after killing subprocess
+    # The subprocess leaves GPIO pins in their last state, motor stays enabled
+    import RPi.GPIO as GPIO
+    SLEEP_PIN = 7  # Motor driver sleep pin
+    try:
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(SLEEP_PIN, GPIO.OUT)
+        GPIO.output(SLEEP_PIN, GPIO.LOW)  # Disable motor driver
+        print("Motor driver disabled via sleep pin")
+    except Exception as e:
+        print(f"Error disabling motor: {e}")
 
 # --- MAIN LOOP ---
 
@@ -180,8 +193,10 @@ def main():
     # Touch state tracking (simpler approach)
     was_touched = False
     touch_start_pos = None
+    touch_end_pos = None
     touch_start_time = None
     TAP_MAX_DURATION = 0.3  # 300ms max for tap
+    TAP_MAX_MOVEMENT = 15  # Max 15px movement for tap
 
     try:
         while True:
@@ -200,6 +215,7 @@ def main():
 
                     # Touch continuing (HOLD+DRAG for slider)
                     else:
+                        touch_end_pos = (x, y)
                         # Only update slider if motor not running
                         if motor_proc is None:
                             new_rpm = get_slider_rpm(x, y)
@@ -212,10 +228,18 @@ def main():
                     if touch_start_pos and touch_start_time:
                         duration = time.time() - touch_start_time
 
-                        # TAP detected (quick press/release)
+                        # TAP detected (quick press/release with minimal movement)
                         if duration < TAP_MAX_DURATION:
-                            # Check if tap was on button
-                            if is_on_button(*touch_start_pos):
+                            # Check if finger moved too much (drag vs tap)
+                            if touch_end_pos:
+                                dx = touch_end_pos[0] - touch_start_pos[0]
+                                dy = touch_end_pos[1] - touch_start_pos[1]
+                                movement = math.sqrt(dx*dx + dy*dy)
+                            else:
+                                movement = 0
+
+                            # Only register as tap if minimal movement and on button
+                            if movement < TAP_MAX_MOVEMENT and is_on_button(*touch_start_pos):
                                 # Toggle motor
                                 if motor_proc is None:
                                     # START
@@ -232,6 +256,7 @@ def main():
                     # Reset touch tracking
                     was_touched = False
                     touch_start_pos = None
+                    touch_end_pos = None
                     touch_start_time = None
 
                 # Check if motor crashed
