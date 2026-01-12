@@ -44,7 +44,7 @@ class LCD_1inch28:
 
         # Initialize SPI
         self.spi.open(self.spi_bus, self.spi_device)
-        self.spi.max_speed_hz = 40000000  # 40MHz
+        self.spi.max_speed_hz = 60000000  # 60MHz (GC9A01 supports up to 60MHz)
         self.spi.mode = 0b00  # SPI Mode 0
 
         # Turn on backlight
@@ -178,8 +178,8 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
-        # CRITICAL: Always ensure 40MHz before transmission (motor driver sets to 500kHz)
-        self.spi.max_speed_hz = 40000000
+        # CRITICAL: Always ensure 60MHz before transmission (motor driver sets to 5MHz)
+        self.spi.max_speed_hz = 60000000
 
         if image.mode != 'RGB':
             image = image.convert('RGB')

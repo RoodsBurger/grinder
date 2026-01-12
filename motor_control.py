@@ -367,9 +367,13 @@ def main():
                                 draw_ui(disp, rpm, is_running=False)
 
                         elif action == "BUTTON":
-                            # GO button: Initialize motor driver and run
-                            print(f"Initializing motor driver for {rpm} RPM...")
+                            # GO button pressed
+                            print(f"Starting motor at {rpm} RPM...")
 
+                            # 1. Draw STOP UI FIRST (before motor driver exists - display at 60MHz)
+                            draw_ui(disp, rpm, is_running=True)
+
+                            # 2. NOW initialize motor driver (will set SPI to 5MHz)
                             driver = HighPowerStepperDriver(
                                 spi_bus=0, spi_device=0,
                                 cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
@@ -378,18 +382,15 @@ def main():
                             driver.set_current_milliamps(1000)  # Low current for testing
                             driver.set_step_mode(32)            # Set to 1/32 Microstepping
 
-                            # Show running UI (display auto-sets 40MHz speed)
-                            draw_ui(disp, rpm, is_running=True)
-
-                            # Run motor (blocking until stop pressed)
+                            # 3. Run motor (blocking until stop pressed)
                             # Motor SPI will be closed inside run_motor_loop()
                             run_motor_loop(driver, rpm, touch)
 
-                            # Clean up motor driver object
+                            # 4. Motor driver already closed in run_motor_loop(), just cleanup object
                             del driver
                             print("Motor driver cleaned up")
 
-                            # Return to UI-only mode (display auto-sets 40MHz speed)
+                            # 5. Return to UI-only mode (display auto-sets 60MHz speed)
                             draw_ui(disp, rpm, is_running=False)
 
                 time.sleep(0.01)
