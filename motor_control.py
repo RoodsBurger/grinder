@@ -12,20 +12,14 @@ from touch_screen import TouchScreen
 MIN_RPM = 0
 MAX_RPM = 300
 
-# Display Settings (back to 1x for speed)
-SCALE = 1
+# Display Settings
 W_REAL, H_REAL = 240, 240
-W_HIGH, H_HIGH = W_REAL * SCALE, H_REAL * SCALE
-CENTER = (W_HIGH // 2, H_HIGH // 2)
+CENTER = (W_REAL // 2, H_REAL // 2)
 
 # Geometry
-RADIUS_OUTER = 110 * SCALE
-RADIUS_INNER = 85 * SCALE
-BUTTON_RADIUS = 50 * SCALE
-
-# Touch gesture thresholds
-TAP_MAX_DURATION = 0.3  # Max 300ms for tap
-HOLD_MIN_DURATION = 0.1  # Min 100ms for hold
+RADIUS_OUTER = 110
+RADIUS_INNER = 85
+BUTTON_RADIUS = 45  # Button area
 
 # Angles
 START_ANGLE = 135
@@ -50,41 +44,41 @@ def get_angle(x, y):
     deg = math.degrees(math.atan2(dy, dx))
     return (deg + 360) % 360
 
-def map_touch(x, y):
-    """
-    Map touch coordinates to UI actions.
+def is_on_button(x, y):
+    """Check if touch is on button (center area)"""
+    dx = x - (W_REAL // 2)
+    dy = y - (H_REAL // 2)
+    dist = math.sqrt(dx*dx + dy*dy)
+    return dist < BUTTON_RADIUS
 
-    Returns:
-        "BUTTON" if center button pressed (45px radius)
-        int RPM value if touching slider
-        None otherwise
-    """
+def get_slider_rpm(x, y):
+    """Get RPM from slider position, return None if not on slider"""
     dx = x - (W_REAL // 2)
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Button: Smaller area (45px radius)
-    if dist < 45:
-        return "BUTTON"
+    # Must be outside button area
+    if dist < BUTTON_RADIUS:
+        return None
 
-    # Slider: Only if outside button area
     angle = get_angle(x, y)
     eff_angle = angle
-    if eff_angle < 135: eff_angle += 360
+    if eff_angle < 135:
+        eff_angle += 360
 
     start, end = 135, 405
     if start <= eff_angle <= end:
         ratio = (eff_angle - start) / (end - start)
         rpm_value = MIN_RPM + ratio * (MAX_RPM - MIN_RPM)
-        # Round to nearest 5 RPM for precision
+        # Round to nearest 5 RPM
         return int(round(rpm_value / 5) * 5)
 
     return None
 
 def draw_ui(disp, rpm, is_running):
-    """Draws the UI at high resolution with anti-aliasing"""
-    # Render at 2x resolution for smoother edges
-    img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
+    """Draws the UI"""
+    start_time = time.time()
+    img = Image.new("RGB", (W_REAL, H_REAL), COL_BG)
     draw = ImageDraw.Draw(img)
 
     # 1. Track
@@ -109,7 +103,7 @@ def draw_ui(disp, rpm, is_running):
         rad = math.radians(active_angle)
         kx = CENTER[0] + knob_dist * math.cos(rad)
         ky = CENTER[1] + knob_dist * math.sin(rad)
-        kr = 15 * SCALE
+        kr = 15
         draw.ellipse([kx-kr, ky-kr, kx+kr, ky+kr], fill=COL_KNOB)
 
     # 5. Button
@@ -118,24 +112,21 @@ def draw_ui(disp, rpm, is_running):
                   CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS],
                  fill=btn_col)
 
-    # 6. Text (scaled)
+    # 6. Text
     try:
-        font_size = 20 * SCALE
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
-        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15 * SCALE)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
 
         text = "STOP" if is_running else "GO"
         draw.text(CENTER, text, font=font, fill=COL_TEXT, anchor="mm")
-        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm} RPM", font=font_sm, fill=(150,150,150), anchor="mm")
+        draw.text((CENTER[0], CENTER[1] + 70), f"{rpm} RPM", font=font_sm, fill=(150,150,150), anchor="mm")
     except:
         text = "STOP" if is_running else "GO"
         draw.text(CENTER, text, fill=COL_TEXT)
 
-    # 7. Downscale to native resolution with high-quality LANCZOS filter (anti-aliasing)
-    if SCALE > 1:
-        img = img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS)
-
     disp.show_image(img)
+    elapsed = (time.time() - start_time) * 1000
+    print(f"UI render: {elapsed:.1f}ms")
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
@@ -150,66 +141,70 @@ def start_motor_process(rpm):
         stderr=subprocess.PIPE,
         text=True
     )
-    print(f"Started motor process PID {proc.pid} at {rpm} RPM")
+    print(f"Started motor PID {proc.pid}")
     return proc
 
 def stop_motor_process(proc):
-    """Stop motor process gracefully"""
-    if proc and proc.poll() is None:  # Process still running
-        print(f"Stopping motor process PID {proc.pid}")
-        proc.terminate()  # Send SIGTERM
+    """Stop motor process and ensure it's dead"""
+    if proc and proc.poll() is None:
+        print(f"Killing motor PID {proc.pid}")
+        proc.terminate()
         try:
-            proc.wait(timeout=2)  # Wait up to 2 seconds
-            print("Motor process stopped")
+            proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
-            print("Motor process didn't stop, forcing kill")
-            proc.kill()  # Force kill
+            proc.kill()
             proc.wait()
+        print(f"Motor PID {proc.pid} killed")
 
 # --- MAIN LOOP ---
 
 def main():
-    # Initialize display and touch (always active)
+    # Initialize display and touch
     disp = LCD_1inch28()
     disp.init_display()
 
-    time.sleep(2)  # Wait for system to settle
+    time.sleep(2)
 
     touch = TouchScreen()
     touch.init()
 
     rpm = 200
-    motor_proc = None  # Motor process handle
-
-    # Track touch gestures
-    was_touched = False
-    touch_start_pos = None
-    touch_start_time = None
+    motor_proc = None
 
     draw_ui(disp, rpm, is_running=False)
 
-    print("UI ready - TAP center for start/stop, HOLD+DRAG slider for RPM (5 RPM steps)")
+    print("CONTROLS:")
+    print("- TAP center button = start/stop motor")
+    print("- HOLD+DRAG outer ring = change RPM (5 RPM steps)")
+
+    # Touch state tracking (simpler approach)
+    was_touched = False
+    touch_start_pos = None
+    touch_start_time = None
+    TAP_MAX_DURATION = 0.3  # 300ms max for tap
 
     try:
         while True:
             try:
                 currently_touched = touch.is_touched()
 
+                # Touch is active
                 if currently_touched and touch.read_touch():
                     x, y = touch.get_point()
 
-                    # New touch started (transition from not touched to touched)
+                    # New touch started
                     if not was_touched:
                         touch_start_pos = (x, y)
                         touch_start_time = time.time()
                         was_touched = True
 
-                    # Touch continuing (HOLD + DRAG for slider)
+                    # Touch continuing (HOLD+DRAG for slider)
                     else:
-                        if motor_proc is None:  # Only when motor not running
-                            action = map_touch(x, y)
-                            if isinstance(action, int) and action != rpm:
-                                rpm = action
+                        # Only update slider if motor not running
+                        if motor_proc is None:
+                            new_rpm = get_slider_rpm(x, y)
+                            if new_rpm is not None and new_rpm != rpm:
+                                rpm = new_rpm
                                 draw_ui(disp, rpm, is_running=False)
 
                 # Touch released
@@ -217,19 +212,19 @@ def main():
                     if touch_start_pos and touch_start_time:
                         duration = time.time() - touch_start_time
 
-                        # TAP detected (quick press/release < 300ms)
+                        # TAP detected (quick press/release)
                         if duration < TAP_MAX_DURATION:
-                            action = map_touch(*touch_start_pos)
-
-                            if action == "BUTTON":
+                            # Check if tap was on button
+                            if is_on_button(*touch_start_pos):
+                                # Toggle motor
                                 if motor_proc is None:
-                                    # START motor
-                                    print(f"Starting motor at {rpm} RPM...")
+                                    # START
+                                    print(f"START {rpm} RPM")
                                     draw_ui(disp, rpm, is_running=True)
                                     motor_proc = start_motor_process(rpm)
                                 else:
-                                    # STOP motor
-                                    print("Stopping motor...")
+                                    # STOP
+                                    print("STOP")
                                     stop_motor_process(motor_proc)
                                     motor_proc = None
                                     draw_ui(disp, rpm, is_running=False)
@@ -239,27 +234,28 @@ def main():
                     touch_start_pos = None
                     touch_start_time = None
 
-                # Check if motor process crashed
+                # Check if motor crashed
                 if motor_proc and motor_proc.poll() is not None:
-                    print(f"Motor process exited with code {motor_proc.returncode}")
+                    print(f"Motor crashed with code {motor_proc.returncode}")
                     motor_proc = None
                     draw_ui(disp, rpm, is_running=False)
 
                 time.sleep(0.01)
 
             except Exception as e:
-                print(f"Error in main loop: {e}")
+                print(f"Loop error: {e}")
+                import traceback
+                traceback.print_exc()
                 time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nShutdown requested")
+        print("\nShutdown")
     finally:
-        print("Cleaning up...")
         if motor_proc:
             stop_motor_process(motor_proc)
         disp.module_exit()
         touch.cleanup()
-        print("Shutdown complete")
+        print("Done")
 
 if __name__ == "__main__":
     main()

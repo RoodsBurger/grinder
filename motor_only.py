@@ -5,6 +5,7 @@ No display, no touch - just motor operation
 """
 import sys
 import time
+import os
 import RPi.GPIO as GPIO
 from pololu_lib import HighPowerStepperDriver
 
@@ -90,8 +91,6 @@ def run_motor(target_rpm):
         print("Motor disabled")
 
 if __name__ == "__main__":
-    import os
-
     if len(sys.argv) != 2:
         print("Usage: motor_only.py <RPM>")
         sys.exit(1)

@@ -179,7 +179,10 @@ class LCD_1inch28:
     def show_image(self, image):
         """Display a PIL Image on the screen"""
         # CRITICAL: Always ensure 60MHz before transmission (motor driver sets to 5MHz)
+        old_speed = self.spi.max_speed_hz
         self.spi.max_speed_hz = 60000000
+        if old_speed != 60000000:
+            print(f"WARNING: Display SPI was {old_speed}Hz, reset to 60MHz")
 
         if image.mode != 'RGB':
             image = image.convert('RGB')
