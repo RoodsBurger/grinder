@@ -213,17 +213,9 @@ def check_stop_button(touch):
 def run_motor_loop(driver, target_rpm, touch):
     """
     Blocking loop that runs the motor with acceleration/deceleration.
-    Only checks for stop button - no UI updates during operation.
+    Pure GPIO operation - SPI already closed.
     """
     print(f"Starting Motor at {target_rpm} RPM")
-
-    # Set Direction
-    GPIO.output(DIR_PIN, MOTOR_DIRECTION)
-
-    driver.enable_driver()
-
-    # Clear any previous faults
-    driver.clear_faults()
 
     # Calculate Step Delay (for cruise phase)
     steps_rev = 200
@@ -313,9 +305,11 @@ def run_motor_loop(driver, target_rpm, touch):
     except Exception as e:
         print(f"Motor loop error in {motor_phase} phase: {e}")
     finally:
-        driver.disable_driver()
+        # Disable driver via sleep pin (no SPI needed)
+        if driver.sleep_pin:
+            GPIO.output(driver.sleep_pin, GPIO.LOW)
         print(f"Motor Stopped & Disabled ({steps_count} total steps)")
-        # Note: SPI already closed after init, no fault checking available
+        # Note: SPI closed after init, driver disabled via sleep pin only
 
 
 def main():
@@ -366,6 +360,13 @@ def main():
                             driver.reset_settings()
                             driver.set_current_milliamps(1000)  # Low current for testing
                             driver.set_step_mode(32)            # Set to 1/32 Microstepping
+
+                            # Set direction
+                            GPIO.output(DIR_PIN, MOTOR_DIRECTION)
+
+                            # Enable driver and clear faults (needs SPI)
+                            driver.enable_driver()
+                            driver.clear_faults()
 
                             # CRITICAL: Close motor SPI NOW - motor loop only uses GPIO pins!
                             driver.spi.close()
