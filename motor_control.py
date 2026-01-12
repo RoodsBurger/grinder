@@ -16,15 +16,17 @@ SLEEP_PIN = 7  # Motor driver sleep pin
 MIN_RPM = 0
 MAX_RPM = 300
 
-# Display Settings
+# Display Settings - Render at 2x for crispness
+SCALE = 2
 W_REAL, H_REAL = 240, 240
-CENTER = (W_REAL // 2, H_REAL // 2)
+W_HIGH, H_HIGH = W_REAL * SCALE, H_REAL * SCALE
+CENTER = (W_HIGH // 2, H_HIGH // 2)
 
-# Geometry
-RADIUS_OUTER = 110
-RADIUS_INNER = 85
-BUTTON_RADIUS = 45  # Visual button area
-BUTTON_TAP_RADIUS = 40  # Smaller detection area for precise taps
+# Geometry (scaled)
+RADIUS_OUTER = 110 * SCALE
+RADIUS_INNER = 85 * SCALE
+BUTTON_RADIUS = 45 * SCALE  # Visual button area
+BUTTON_TAP_RADIUS = 40  # Touch detection in screen coordinates (not scaled)
 
 # Angles
 START_ANGLE = 135
@@ -62,8 +64,12 @@ def get_slider_rpm(x, y):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Must be outside button area (use visual radius)
-    if dist < BUTTON_RADIUS:
+    # Touch coordinates are in real screen space (not scaled)
+    # Button radius in real space is 45px
+    BUTTON_REAL = 45  # Visual button size in screen coordinates
+
+    # Must be outside button area to be on slider
+    if dist < BUTTON_REAL:
         return None
 
     angle = get_angle(x, y)
@@ -81,12 +87,14 @@ def get_slider_rpm(x, y):
     return None
 
 def draw_ui(disp, rpm, is_running):
-    """Draws the UI"""
+    """Draws the UI at 2x resolution for crisp anti-aliased graphics"""
     start_time = time.time()
-    img = Image.new("RGB", (W_REAL, H_REAL), COL_BG)
+
+    # Render at high resolution (2x)
+    img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
     draw = ImageDraw.Draw(img)
 
-    # 1. Track
+    # 1. Track (outer ring)
     bbox = [CENTER[0]-RADIUS_OUTER, CENTER[1]-RADIUS_OUTER,
             CENTER[0]+RADIUS_OUTER, CENTER[1]+RADIUS_OUTER]
     draw.pieslice(bbox, start=START_ANGLE, end=END_ANGLE, fill=COL_TRACK)
@@ -102,32 +110,36 @@ def draw_ui(disp, rpm, is_running):
                  CENTER[0]+RADIUS_INNER, CENTER[1]+RADIUS_INNER]
     draw.ellipse(mask_bbox, fill=COL_BG)
 
-    # 4. Knob
+    # 4. Knob (only when not running)
     if not is_running:
         knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2
         rad = math.radians(active_angle)
         kx = CENTER[0] + knob_dist * math.cos(rad)
         ky = CENTER[1] + knob_dist * math.sin(rad)
-        kr = 15
+        kr = 15 * SCALE
         draw.ellipse([kx-kr, ky-kr, kx+kr, ky+kr], fill=COL_KNOB)
 
-    # 5. Button
+    # 5. Button (center)
     btn_col = COL_BTN_STOP if is_running else COL_BTN_GO
     draw.ellipse([CENTER[0]-BUTTON_RADIUS, CENTER[1]-BUTTON_RADIUS,
                   CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS],
                  fill=btn_col)
 
-    # 6. Text
+    # 6. Text (scaled)
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
+        font_size = 20 * SCALE
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15 * SCALE)
 
         text = "STOP" if is_running else "GO"
         draw.text(CENTER, text, font=font, fill=COL_TEXT, anchor="mm")
-        draw.text((CENTER[0], CENTER[1] + 70), f"{rpm} RPM", font=font_sm, fill=(150,150,150), anchor="mm")
+        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm} RPM", font=font_sm, fill=(150,150,150), anchor="mm")
     except:
         text = "STOP" if is_running else "GO"
         draw.text(CENTER, text, fill=COL_TEXT)
+
+    # 7. Downscale with anti-aliasing (LANCZOS for quality)
+    img = img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS)
 
     disp.show_image(img)
     elapsed = (time.time() - start_time) * 1000
@@ -218,6 +230,11 @@ def main():
                         touch_start_pos = (x, y)
                         touch_start_time = time.time()
                         was_touched = True
+                        # Check what user touched
+                        if is_on_button(x, y):
+                            print(f"Touch started: BUTTON at ({x}, {y})")
+                        else:
+                            print(f"Touch started: SLIDER at ({x}, {y})")
 
                     # Touch continuing (HOLD+DRAG for slider)
                     else:
@@ -226,6 +243,7 @@ def main():
                         if motor_proc is None:
                             new_rpm = get_slider_rpm(x, y)
                             if new_rpm is not None and new_rpm != rpm:
+                                print(f"Slider drag: {rpm} → {new_rpm} RPM")
                                 rpm = new_rpm
                                 draw_ui(disp, rpm, is_running=False)
 
@@ -244,20 +262,24 @@ def main():
                             else:
                                 movement = 0
 
+                            print(f"TAP: duration={duration*1000:.0f}ms, movement={movement:.0f}px")
+
                             # Only register as tap if minimal movement and on button
                             if movement < TAP_MAX_MOVEMENT and is_on_button(*touch_start_pos):
                                 # Toggle motor
                                 if motor_proc is None:
                                     # START
-                                    print(f"START {rpm} RPM")
+                                    print(f"✓ START {rpm} RPM")
                                     draw_ui(disp, rpm, is_running=True)
                                     motor_proc = start_motor_process(rpm)
                                 else:
                                     # STOP
-                                    print("STOP")
+                                    print("✓ STOP")
                                     stop_motor_process(motor_proc)
                                     motor_proc = None
                                     draw_ui(disp, rpm, is_running=False)
+                            else:
+                                print(f"  (ignored: movement too large or not on button)")
 
                     # Reset touch tracking
                     was_touched = False

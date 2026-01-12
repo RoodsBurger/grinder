@@ -178,26 +178,23 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
-        # CRITICAL: Force SPI speed reset by closing and reopening
-        # Motor subprocess corrupts kernel SPI state even though it's a separate process
+        # CRITICAL: Check and fix SPI speed before every frame
+        # Motor subprocess corrupts kernel SPI state
         try:
-            current_speed = self.spi.max_speed_hz
-            if current_speed != 60000000:
-                print(f"WARNING: SPI was {current_speed}Hz, reopening at 60MHz")
+            # Force speed setting (sometimes spidev reports wrong value)
+            self.spi.max_speed_hz = 60000000
+
+            # Verify by reading back
+            actual_speed = self.spi.max_speed_hz
+            if actual_speed != 60000000:
+                # Speed didn't stick - kernel corrupted, must reopen
+                print(f"SPI speed stuck at {actual_speed}Hz, reopening...")
                 self.spi.close()
                 self.spi.open(self.spi_bus, self.spi_device)
                 self.spi.max_speed_hz = 60000000
                 self.spi.mode = 0b00
-        except (AttributeError, OSError) as e:
-            # SPI connection lost or corrupted - force reinit
-            print(f"SPI error: {e}, reinitializing...")
-            try:
-                self.spi.close()
-            except:
-                pass
-            self.spi.open(self.spi_bus, self.spi_device)
-            self.spi.max_speed_hz = 60000000
-            self.spi.mode = 0b00
+        except Exception as e:
+            print(f"SPI error: {e}")
 
         if image.mode != 'RGB':
             image = image.convert('RGB')
