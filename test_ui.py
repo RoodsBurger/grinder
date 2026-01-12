@@ -14,16 +14,19 @@ from touch_screen import TouchScreen
 MIN_RPM = 0
 MAX_RPM = 300
 
-# High-resolution rendering for crisp graphics
-SCALE = 2  # Render at 2x resolution, downscale for anti-aliasing
+# Display Settings (back to 1x for speed)
+SCALE = 1
 W_REAL, H_REAL = 240, 240
 W_HIGH, H_HIGH = W_REAL * SCALE, H_REAL * SCALE
 CENTER = (W_HIGH // 2, H_HIGH // 2)
 
-# Geometry (scaled)
+# Geometry
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 85 * SCALE
 BUTTON_RADIUS = 50 * SCALE
+
+# Touch gesture thresholds
+TAP_MAX_DURATION = 0.3  # Max 300ms for tap
 
 # Angles
 START_ANGLE = 135
@@ -152,35 +155,60 @@ def main():
 
     frame_count = 0
     frame_times = []
-    
+
+    # Track touch gestures
+    touch_start_pos = None
+    touch_start_time = None
+
+    print("TAP center button to toggle, HOLD+DRAG slider to change RPM\n")
+
     try:
         while True:
-            if touch.is_touched():
-                if touch.read_touch():
-                    x, y = touch.get_point()
+            if touch.is_touched() and touch.read_touch():
+                x, y = touch.get_point()
+                touch_state = touch.get_touch_state()
+
+                # New touch started
+                if touch_state == touch.STATE_PRESSED:
+                    touch_start_pos = (x, y)
+                    touch_start_time = time.time()
+
+                # Touch being held and dragged - SLIDER
+                elif touch_state == touch.STATE_HELD:
                     action = map_touch(x, y)
-
-                    if isinstance(action, int):
-                        if action != rpm:
-                            rpm = action
-                            start = time.time()
-                            draw_ui(disp, rpm, is_running)
-                            elapsed = time.time() - start
-                            frame_times.append(elapsed)
-                            frame_count += 1
-
-                            if frame_count % 10 == 0:
-                                avg = sum(frame_times[-10:]) / 10
-                                print(f"Frame {frame_count}: {elapsed*1000:.1f}ms (avg: {avg*1000:.1f}ms, {1/avg:.1f} FPS)")
-
-                    elif action == "BUTTON":
-                        is_running = not is_running
+                    if isinstance(action, int) and action != rpm:
+                        rpm = action
                         start = time.time()
                         draw_ui(disp, rpm, is_running)
                         elapsed = time.time() - start
                         frame_times.append(elapsed)
                         frame_count += 1
-                        print(f"Button pressed: {'RUNNING' if is_running else 'STOPPED'} ({elapsed*1000:.1f}ms)")
+
+                        if frame_count % 10 == 0:
+                            avg = sum(frame_times[-10:]) / 10
+                            print(f"Frame {frame_count}: {elapsed*1000:.1f}ms (avg: {avg*1000:.1f}ms, {1/avg:.1f} FPS)")
+
+                # Touch released - check for TAP (button)
+                elif touch_state == touch.STATE_RELEASED:
+                    if touch_start_pos and touch_start_time:
+                        duration = time.time() - touch_start_time
+
+                        # TAP detected (quick press/release)
+                        if duration < TAP_MAX_DURATION:
+                            action = map_touch(*touch_start_pos)
+
+                            if action == "BUTTON":
+                                is_running = not is_running
+                                start = time.time()
+                                draw_ui(disp, rpm, is_running)
+                                elapsed = time.time() - start
+                                frame_times.append(elapsed)
+                                frame_count += 1
+                                print(f"Button tapped: {'RUNNING' if is_running else 'STOPPED'} ({elapsed*1000:.1f}ms)")
+
+                    # Reset touch tracking
+                    touch_start_pos = None
+                    touch_start_time = None
 
             time.sleep(0.01)
 

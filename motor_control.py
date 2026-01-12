@@ -12,16 +12,20 @@ from touch_screen import TouchScreen
 MIN_RPM = 0
 MAX_RPM = 300
 
-# High-resolution rendering for crisp graphics
-SCALE = 2  # Render at 2x resolution, downscale for anti-aliasing
+# Display Settings (back to 1x for speed)
+SCALE = 1
 W_REAL, H_REAL = 240, 240
 W_HIGH, H_HIGH = W_REAL * SCALE, H_REAL * SCALE
 CENTER = (W_HIGH // 2, H_HIGH // 2)
 
-# Geometry (scaled)
+# Geometry
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 85 * SCALE
 BUTTON_RADIUS = 50 * SCALE
+
+# Touch gesture thresholds
+TAP_MAX_DURATION = 0.3  # Max 300ms for tap
+HOLD_MIN_DURATION = 0.1  # Min 100ms for hold
 
 # Angles
 START_ANGLE = 135
@@ -175,37 +179,59 @@ def main():
     rpm = 200
     motor_proc = None  # Motor process handle
 
+    # Track touch gestures
+    touch_start_pos = None
+    touch_start_time = None
+
     draw_ui(disp, rpm, is_running=False)
 
-    print("UI ready - rendering at 2x resolution for crisp graphics")
-    print("Touch slider to change RPM, touch center button to start/stop")
+    print("UI ready - TAP center for start/stop, HOLD+DRAG slider for RPM")
 
     try:
         while True:
             try:
-                if touch.is_touched():
-                    if touch.read_touch():
-                        x, y = touch.get_point()
-                        action = map_touch(x, y)
+                if touch.is_touched() and touch.read_touch():
+                    x, y = touch.get_point()
+                    touch_state = touch.get_touch_state()
 
-                        if isinstance(action, int):
-                            # Slider: Change RPM (only when motor not running)
-                            if motor_proc is None and action != rpm:
+                    # New touch started
+                    if touch_state == touch.STATE_PRESSED:
+                        touch_start_pos = (x, y)
+                        touch_start_time = time.time()
+
+                    # Touch being held and dragged - SLIDER
+                    elif touch_state == touch.STATE_HELD:
+                        if motor_proc is None:  # Only when motor not running
+                            action = map_touch(x, y)
+                            if isinstance(action, int) and action != rpm:
                                 rpm = action
                                 draw_ui(disp, rpm, is_running=False)
 
-                        elif action == "BUTTON":
-                            if motor_proc is None:
-                                # START motor
-                                print(f"Starting motor at {rpm} RPM...")
-                                draw_ui(disp, rpm, is_running=True)
-                                motor_proc = start_motor_process(rpm)
-                            else:
-                                # STOP motor
-                                print("Stopping motor...")
-                                stop_motor_process(motor_proc)
-                                motor_proc = None
-                                draw_ui(disp, rpm, is_running=False)
+                    # Touch released - check for TAP (button)
+                    elif touch_state == touch.STATE_RELEASED:
+                        if touch_start_pos and touch_start_time:
+                            duration = time.time() - touch_start_time
+
+                            # TAP detected (quick press/release)
+                            if duration < TAP_MAX_DURATION:
+                                action = map_touch(*touch_start_pos)
+
+                                if action == "BUTTON":
+                                    if motor_proc is None:
+                                        # START motor
+                                        print(f"Starting motor at {rpm} RPM...")
+                                        draw_ui(disp, rpm, is_running=True)
+                                        motor_proc = start_motor_process(rpm)
+                                    else:
+                                        # STOP motor
+                                        print("Stopping motor...")
+                                        stop_motor_process(motor_proc)
+                                        motor_proc = None
+                                        draw_ui(disp, rpm, is_running=False)
+
+                        # Reset touch tracking
+                        touch_start_pos = None
+                        touch_start_time = None
 
                 # Check if motor process crashed
                 if motor_proc and motor_proc.poll() is not None:
