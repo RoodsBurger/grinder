@@ -332,7 +332,7 @@ def main():
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
     driver.reset_settings()
-    driver.set_current_milliamps(6500)
+    driver.set_current_milliamps(1000)  # Low current for testing
     driver.set_step_mode(32)            # Set to 1/32 Microstepping
     driver.disable_driver()
 
