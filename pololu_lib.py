@@ -224,8 +224,9 @@ class HighPowerStepperDriver:
         Bit 0: STDLAT - Stall Detected Latched
         """
         status = self.read_status()
-        # Only consider critical faults (bits 2-7), ignore stall detection (bits 0-1) as it can be noisy
-        critical_faults = status & 0xFC  # Mask bits 2-7 only
+        # Only consider critical faults (bits 2-4), ignore thermal/overcurrent (bits 5-7) and stall (bits 0-1)
+        # WARNING: Ignoring thermal shutdown is dangerous and can damage hardware
+        critical_faults = status & 0x1C  # Bits 2-4 only (predriver faults, undervoltage)
         return {
             'raw_status': status,
             'ots_thermal': bool((status >> 7) & 0x01),
