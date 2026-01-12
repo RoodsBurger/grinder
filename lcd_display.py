@@ -25,6 +25,9 @@ class LCD_1inch28:
         self.spi_bus = 0
         self.spi_device = 0
 
+        # Track if SPI needs reset (set by external code after motor runs)
+        self.spi_corrupted = False
+
         # Pre-rendered image cache for performance
         self.cache_enabled = False
         self.static_background = None  # Cached background (track + center hole)
@@ -178,21 +181,17 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
-        # Check SPI speed and only reopen if corrupted
-        try:
-            # Try to set speed
-            self.spi.max_speed_hz = 60000000
-
-            # Verify it actually changed (readback test)
-            if self.spi.max_speed_hz != 60000000:
-                # Speed is stuck - must reopen
-                print(f"SPI stuck at {self.spi.max_speed_hz}Hz, reopening...")
+        # Force SPI reopen if motor subprocess corrupted it
+        if self.spi_corrupted:
+            try:
                 self.spi.close()
                 self.spi.open(self.spi_bus, self.spi_device)
                 self.spi.max_speed_hz = 60000000
                 self.spi.mode = 0b00
-        except Exception as e:
-            print(f"SPI error: {e}")
+                self.spi_corrupted = False
+                print("SPI reset after motor subprocess")
+            except Exception as e:
+                print(f"SPI reset error: {e}")
 
         if image.mode != 'RGB':
             image = image.convert('RGB')

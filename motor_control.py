@@ -63,10 +63,10 @@ def map_touch(x, y, debug=False):
     if debug:
         print(f"  map_touch: ({x},{y}) -> dist={dist:.1f}px from center")
 
-    # Button in center (45px for precision)
-    if dist < 45:
+    # Button in center (35px - smaller to avoid accidental triggers while dragging)
+    if dist < 35:
         if debug:
-            print(f"    → BUTTON (dist < 45px)")
+            print(f"    → BUTTON (dist < 35px)")
         return "BUTTON"
 
     # Slider - calculate RPM from angle
@@ -150,11 +150,19 @@ def draw_ui(disp, rpm, is_running, animate=False):
     elapsed = (time.time() - start_time) * 1000
     print(f"UI render: {elapsed:.1f}ms")
 
-def animate_transition(disp, rpm, from_running, to_running, frames=3):
-    """Smooth animation when starting/stopping motor"""
-    for _ in range(frames):
-        draw_ui(disp, rpm, to_running, animate=True)
-        time.sleep(0.03)  # 30ms per frame = 90ms total animation
+def animate_transition(disp, rpm, from_running, to_running):
+    """Smooth pulse animation when starting/stopping motor"""
+    # Draw the target state first
+    draw_ui(disp, rpm, to_running, animate=True)
+    time.sleep(0.05)
+
+    # Pulse effect: flash back to original state briefly
+    draw_ui(disp, rpm, from_running, animate=True)
+    time.sleep(0.03)
+
+    # Return to target state
+    draw_ui(disp, rpm, to_running, animate=True)
+    time.sleep(0.05)
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
@@ -172,7 +180,7 @@ def start_motor_process(rpm):
     print(f"Started motor PID {proc.pid}")
     return proc
 
-def stop_motor_process(proc):
+def stop_motor_process(proc, disp):
     """Stop motor process and ensure motor driver is disabled"""
     if proc and proc.poll() is None:
         print(f"Killing motor PID {proc.pid}")
@@ -191,6 +199,9 @@ def stop_motor_process(proc):
         print("Motor driver disabled via sleep pin")
     except Exception as e:
         print(f"Error disabling motor: {e}")
+
+    # Mark SPI as corrupted - motor subprocess changed it to 5MHz
+    disp.spi_corrupted = True
 
 # --- MAIN LOOP ---
 
@@ -266,7 +277,7 @@ def main():
                             else:
                                 # STOP with animation
                                 print("→ STOP")
-                                stop_motor_process(motor_proc)
+                                stop_motor_process(motor_proc, disp)
                                 motor_proc = None
                                 animate_transition(disp, rpm, True, False)
                             # Debounce button
@@ -290,7 +301,7 @@ def main():
         print("\nShutdown")
     finally:
         if motor_proc:
-            stop_motor_process(motor_proc)
+            stop_motor_process(motor_proc, disp)
         # Ensure motor is disabled
         try:
             GPIO.output(SLEEP_PIN, GPIO.LOW)
