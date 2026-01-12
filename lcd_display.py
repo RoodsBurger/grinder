@@ -6,7 +6,7 @@ import time
 import numpy as np
 import spidev
 import RPi.GPIO as GPIO
-from PIL import Image
+from PIL import Image, ImageDraw
 
 class LCD_1inch28:
     def __init__(self):
@@ -24,6 +24,12 @@ class LCD_1inch28:
         self.spi = spidev.SpiDev()
         self.spi_bus = 0
         self.spi_device = 0
+
+        # Pre-rendered image cache for performance
+        self.cache_enabled = False
+        self.static_background = None  # Cached background (track + center hole)
+        self.arc_cache = {}  # Pre-rendered arcs at RPM increments
+        self.cache_rpm_step = 10  # Cache every 10 RPM
 
     def module_init(self):
         """Initialize GPIO and SPI"""
@@ -219,3 +225,160 @@ class LCD_1inch28:
         """Clear the screen with a solid color"""
         image = Image.new('RGB', (self.width, self.height), color)
         self.show_image(image)
+
+    def build_static_background(self, center, radius_outer, radius_inner,
+                               start_angle, end_angle, bg_color, track_color):
+        """
+        Pre-render the static background elements (track + center hole).
+        Call this once during initialization.
+
+        Args:
+            center: (x, y) tuple for center point
+            radius_outer: Outer radius of track
+            radius_inner: Inner radius (center hole)
+            start_angle: Start angle in degrees
+            end_angle: End angle in degrees
+            bg_color: Background RGB tuple
+            track_color: Track color RGB tuple
+
+        Returns: PIL Image of background
+        """
+        img = Image.new('RGB', (self.width, self.height), bg_color)
+        draw = ImageDraw.Draw(img)
+
+        # Draw track
+        bbox = [center[0]-radius_outer, center[1]-radius_outer,
+                center[0]+radius_outer, center[1]+radius_outer]
+        draw.pieslice(bbox, start=start_angle, end=end_angle, fill=track_color)
+
+        # Draw center hole
+        hole_bbox = [center[0]-radius_inner, center[1]-radius_inner,
+                     center[0]+radius_inner, center[1]+radius_inner]
+        draw.ellipse(hole_bbox, fill=bg_color)
+
+        self.static_background = img
+        print("Built static background cache")
+        return img
+
+    def build_arc_cache(self, center, radius_outer, start_angle, end_angle,
+                       active_color, min_rpm, max_rpm):
+        """
+        Pre-render arc states at RPM_STEP increments.
+        Call this once during initialization.
+
+        Args:
+            center: (x, y) tuple for center point
+            radius_outer: Outer radius of arc
+            start_angle: Start angle in degrees
+            end_angle: End angle in degrees
+            active_color: Arc fill color RGB tuple
+            min_rpm: Minimum RPM value
+            max_rpm: Maximum RPM value
+
+        Caches arcs for each RPM value at cache_rpm_step increments.
+        """
+        if self.static_background is None:
+            raise RuntimeError("Must build static background before arc cache")
+
+        bbox = [center[0]-radius_outer, center[1]-radius_outer,
+                center[0]+radius_outer, center[1]+radius_outer]
+
+        # Pre-render arcs for each RPM step
+        rpm_range = max_rpm - min_rpm
+        steps = (rpm_range // self.cache_rpm_step) + 1
+
+        print(f"Building arc cache: {steps} images...")
+
+        for i in range(steps + 1):
+            rpm = min_rpm + (i * self.cache_rpm_step)
+            if rpm > max_rpm:
+                rpm = max_rpm
+
+            # Calculate arc angle for this RPM
+            ratio = (rpm - min_rpm) / rpm_range
+            active_angle = start_angle + ratio * (end_angle - start_angle)
+
+            # Create arc on transparent background
+            arc_img = Image.new('RGBA', (self.width, self.height), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(arc_img)
+            draw.pieslice(bbox, start=start_angle, end=active_angle,
+                         fill=active_color + (255,))  # Add alpha
+
+            self.arc_cache[rpm] = arc_img
+
+        self.cache_enabled = True
+        print(f"Arc cache built: {len(self.arc_cache)} images")
+
+    def get_cached_arc(self, rpm):
+        """
+        Get the closest pre-rendered arc for given RPM.
+
+        Args: rpm - Target RPM value
+        Returns: PIL Image (RGBA) of arc, or None if cache disabled
+        """
+        if not self.cache_enabled:
+            return None
+
+        # Round to nearest cache step
+        cache_rpm = round(rpm / self.cache_rpm_step) * self.cache_rpm_step
+
+        # Clamp to available range
+        available_rpms = sorted(self.arc_cache.keys())
+        if cache_rpm < available_rpms[0]:
+            cache_rpm = available_rpms[0]
+        elif cache_rpm > available_rpms[-1]:
+            cache_rpm = available_rpms[-1]
+
+        return self.arc_cache.get(cache_rpm)
+
+    def composite_cached_frame(self, rpm, knob_pos=None, button_color=None,
+                              button_radius=None, text_elements=None):
+        """
+        Composite a frame from cached elements + dynamic overlays.
+        This is the fast-path rendering method.
+
+        Args:
+            rpm: Current RPM value
+            knob_pos: (x, y) tuple for knob position, or None to skip
+            button_color: RGB tuple for button, or None to use default
+            button_radius: Button radius, or None to skip button
+            text_elements: List of (text, position, font, color) tuples, or None
+
+        Returns: PIL Image ready to display
+        """
+        if not self.cache_enabled or self.static_background is None:
+            raise RuntimeError("Cache not initialized. Call build_*_cache() first")
+
+        # Start with background
+        frame = self.static_background.copy()
+
+        # Composite arc
+        arc = self.get_cached_arc(rpm)
+        if arc:
+            frame.paste(arc, (0, 0), arc)  # Use arc as alpha mask
+
+        # Draw dynamic elements
+        draw = ImageDraw.Draw(frame)
+
+        # Knob (if not locked)
+        if knob_pos:
+            kx, ky = knob_pos
+            kr = 15
+            draw.ellipse([kx-kr, ky-kr, kx+kr, ky+kr], fill=(255, 255, 255))
+
+        # Button
+        if button_color and button_radius:
+            center = (self.width // 2, self.height // 2)
+            draw.ellipse([center[0]-button_radius, center[1]-button_radius,
+                         center[0]+button_radius, center[1]+button_radius],
+                        fill=button_color)
+
+        # Text overlays
+        if text_elements:
+            for text, pos, font, color in text_elements:
+                if font:
+                    draw.text(pos, text, font=font, fill=color, anchor="mm")
+                else:
+                    draw.text(pos, text, fill=color)
+
+        return frame
