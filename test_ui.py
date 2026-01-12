@@ -24,7 +24,7 @@ CENTER = (W_HIGH // 2, H_HIGH // 2)
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 70 * SCALE  # Thicker slider track
 BUTTON_RADIUS = 40 * SCALE  # Button size (visual)
-BUTTON_TOUCH_RADIUS = 28  # Touch detection (smaller to avoid slider conflicts)
+BUTTON_TOUCH_RADIUS = 22  # Touch detection (even smaller to avoid slider conflicts)
 KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
 ICON_SIZE = 32 * SCALE  # Icon size (bigger)
 
@@ -58,11 +58,16 @@ def map_touch(x, y):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Button: Smaller touch area to avoid slider conflicts
+    # Button in center
     if dist < BUTTON_TOUCH_RADIUS:
         return "BUTTON"
 
-    # Slider: Only if outside button area
+    # Dead zone between button and slider (prevents accidental slider when pressing button)
+    DEAD_ZONE_OUTER = 45  # Small buffer zone
+    if dist < DEAD_ZONE_OUTER:
+        return None
+
+    # Slider: Only if outside dead zone
     angle = get_angle(x, y)
     eff_angle = angle
     if eff_angle < 135: eff_angle += 360
@@ -112,19 +117,23 @@ def draw_ui(disp, rpm, is_running):
                   CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS],
                  fill=btn_col)
 
-    # 6. Icon (coffee beans theme - whole vs ground)
+    # 6. Icon (coffee beans theme - whole vs ground, same size)
     if is_running:
-        # Stop icon - Ground coffee (fine particles)
-        r = ICON_SIZE // 2
+        # Stop icon - Ground coffee (fine particles, full size)
         import random
         random.seed(42)  # Consistent pattern
         # Draw many small dots/particles to represent ground coffee
-        particle_count = 35
+        # Use same size as bean icon for consistency
+        bean_w = ICON_SIZE * 0.35
+        bean_h = ICON_SIZE * 0.5
+        spacing = ICON_SIZE * 0.25
+
+        particle_count = 40
         for _ in range(particle_count):
-            # Random position within icon area
-            offset_x = random.uniform(-r*0.7, r*0.7)
-            offset_y = random.uniform(-r*0.7, r*0.7)
-            particle_size = random.uniform(1*SCALE, 2.5*SCALE)
+            # Random position spanning full icon area (same as beans)
+            offset_x = random.uniform(-bean_w - spacing, bean_w + spacing)
+            offset_y = random.uniform(-bean_h, bean_h)
+            particle_size = random.uniform(1.5*SCALE, 3*SCALE)
             draw.ellipse([CENTER[0] + offset_x - particle_size,
                          CENTER[1] + offset_y - particle_size,
                          CENTER[0] + offset_x + particle_size,
@@ -141,7 +150,7 @@ def draw_ui(disp, rpm, is_running):
         draw.ellipse([left_x - bean_w, CENTER[1] - bean_h,
                      left_x + bean_w, CENTER[1] + bean_h],
                     fill=COL_TEXT)
-        # Bean groove (darker line on white bean)
+        # Bean groove (colored line on white bean)
         groove_w = bean_w * 0.8
         draw.arc([left_x - groove_w, CENTER[1] - bean_h*0.6,
                  left_x + groove_w, CENTER[1] + bean_h*0.6],
