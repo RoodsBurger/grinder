@@ -24,7 +24,7 @@ class TouchScreen:
         self.touched = False
 
         # Touch filtering and debouncing
-        self.debounce_time = 0.035  # 35ms debounce
+        self.debounce_time = 0.01  # 10ms debounce for fast response
         self.last_touch_time = 0
         self.hysteresis = 5  # pixels - ignore moves smaller than this
         self.last_x = 0
@@ -184,8 +184,8 @@ class TouchScreen:
         """
         current_time = time.time()
 
-        # Minimal debounce - only skip if called too rapidly (< 10ms)
-        if current_time - self.last_touch_time < 0.01:
+        # Minimal debounce - only skip if called too rapidly
+        if current_time - self.last_touch_time < self.debounce_time:
             return False
 
         # Try reading with retry logic

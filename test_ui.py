@@ -14,16 +14,17 @@ from touch_screen import TouchScreen
 MIN_RPM = 0
 MAX_RPM = 300
 
-# Display Settings (back to 1x for speed)
-SCALE = 1
+# Display Settings - Render at 2x for crispness
+SCALE = 2
 W_REAL, H_REAL = 240, 240
 W_HIGH, H_HIGH = W_REAL * SCALE, H_REAL * SCALE
 CENTER = (W_HIGH // 2, H_HIGH // 2)
 
-# Geometry
+# Geometry (scaled)
 RADIUS_OUTER = 110 * SCALE
-RADIUS_INNER = 85 * SCALE
-BUTTON_RADIUS = 50 * SCALE
+RADIUS_INNER = 70 * SCALE  # Thicker slider track
+BUTTON_RADIUS = 30 * SCALE  # Smaller button
+KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
 
 # Touch gesture thresholds
 TAP_MAX_DURATION = 0.3  # Max 300ms for tap
@@ -55,8 +56,8 @@ def map_touch(x, y):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Button: Smaller area (45px radius) - only the actual button
-    if dist < 45:
+    # Button: Small center button
+    if dist < 25:
         return "BUTTON"
 
     # Slider: Only if outside button area
@@ -101,8 +102,7 @@ def draw_ui(disp, rpm, is_running):
         rad = math.radians(active_angle)
         kx = CENTER[0] + knob_dist * math.cos(rad)
         ky = CENTER[1] + knob_dist * math.sin(rad)
-        kr = 15 * SCALE
-        draw.ellipse([kx-kr, ky-kr, kx+kr, ky+kr], fill=COL_KNOB)
+        draw.ellipse([kx-KNOB_RADIUS, ky-KNOB_RADIUS, kx+KNOB_RADIUS, ky+KNOB_RADIUS], fill=COL_KNOB)
 
     # 5. Button
     btn_col = COL_BTN_STOP if is_running else COL_BTN_GO

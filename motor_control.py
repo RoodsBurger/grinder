@@ -24,9 +24,9 @@ CENTER = (W_HIGH // 2, H_HIGH // 2)
 
 # Geometry (scaled)
 RADIUS_OUTER = 110 * SCALE
-RADIUS_INNER = 85 * SCALE
-BUTTON_RADIUS = 45 * SCALE  # Visual button area
-BUTTON_TAP_RADIUS = 40  # Touch detection in screen coordinates (not scaled)
+RADIUS_INNER = 70 * SCALE  # Thicker slider track
+BUTTON_RADIUS = 30 * SCALE  # Smaller button
+KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
 
 # Angles
 START_ANGLE = 135
@@ -63,10 +63,10 @@ def map_touch(x, y, debug=False):
     if debug:
         print(f"  map_touch: ({x},{y}) -> dist={dist:.1f}px from center")
 
-    # Button in center (35px - smaller to avoid accidental triggers while dragging)
-    if dist < 35:
+    # Button in center (25px - small button to avoid accidental triggers)
+    if dist < 25:
         if debug:
-            print(f"    → BUTTON (dist < 35px)")
+            print(f"    → BUTTON (dist < 25px)")
         return "BUTTON"
 
     # Slider - calculate RPM from angle
@@ -91,8 +91,8 @@ def map_touch(x, y, debug=False):
         print(f"    → None (angle out of range)")
     return None
 
-def draw_ui(disp, rpm, is_running, animate=False):
-    """Draws the UI at 2x resolution with optional animation"""
+def draw_ui(disp, rpm, is_running):
+    """Draws the UI at 2x resolution"""
     start_time = time.time()
 
     # Render at high resolution (2x)
@@ -121,8 +121,7 @@ def draw_ui(disp, rpm, is_running, animate=False):
         rad = math.radians(active_angle)
         kx = CENTER[0] + knob_dist * math.cos(rad)
         ky = CENTER[1] + knob_dist * math.sin(rad)
-        kr = 15 * SCALE
-        draw.ellipse([kx-kr, ky-kr, kx+kr, ky+kr], fill=COL_KNOB)
+        draw.ellipse([kx-KNOB_RADIUS, ky-KNOB_RADIUS, kx+KNOB_RADIUS, ky+KNOB_RADIUS], fill=COL_KNOB)
 
     # 5. Button (center)
     btn_col = COL_BTN_STOP if is_running else COL_BTN_GO
@@ -149,20 +148,6 @@ def draw_ui(disp, rpm, is_running, animate=False):
     disp.show_image(img)
     elapsed = (time.time() - start_time) * 1000
     print(f"UI render: {elapsed:.1f}ms")
-
-def animate_transition(disp, rpm, from_running, to_running):
-    """Smooth pulse animation when starting/stopping motor"""
-    # Draw the target state first
-    draw_ui(disp, rpm, to_running, animate=True)
-    time.sleep(0.05)
-
-    # Pulse effect: flash back to original state briefly
-    draw_ui(disp, rpm, from_running, animate=True)
-    time.sleep(0.03)
-
-    # Return to target state
-    draw_ui(disp, rpm, to_running, animate=True)
-    time.sleep(0.05)
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
@@ -254,18 +239,18 @@ def main():
                         # Button - toggle motor
                         elif action == "BUTTON":
                             if motor_proc is None:
-                                # START with animation
+                                # START
                                 print(f"→ START {rpm} RPM")
-                                animate_transition(disp, rpm, False, True)
                                 motor_proc = start_motor_process(rpm)
+                                draw_ui(disp, rpm, is_running=True)
                             else:
-                                # STOP with animation
+                                # STOP
                                 print("→ STOP")
                                 stop_motor_process(motor_proc, disp)
                                 motor_proc = None
-                                animate_transition(disp, rpm, True, False)
-                            # Debounce button
-                            time.sleep(0.3)
+                                draw_ui(disp, rpm, is_running=False)
+                            # Brief debounce
+                            time.sleep(0.15)
 
                 # Check if motor crashed
                 if motor_proc and motor_proc.poll() is not None:
@@ -273,7 +258,7 @@ def main():
                     motor_proc = None
                     draw_ui(disp, rpm, is_running=False)
 
-                time.sleep(0.01)
+                time.sleep(0.005)  # 200Hz update rate
 
             except Exception as e:
                 print(f"Loop error: {e}")
