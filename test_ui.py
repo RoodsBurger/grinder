@@ -67,7 +67,9 @@ def map_touch(x, y):
     start, end = 135, 405
     if start <= eff_angle <= end:
         ratio = (eff_angle - start) / (end - start)
-        return int(MIN_RPM + ratio * (MAX_RPM - MIN_RPM))
+        rpm_value = MIN_RPM + ratio * (MAX_RPM - MIN_RPM)
+        # Round to nearest 5 RPM for precision
+        return int(round(rpm_value / 5) * 5)
 
     return None
 
@@ -157,24 +159,27 @@ def main():
     frame_times = []
 
     # Track touch gestures
+    was_touched = False
     touch_start_pos = None
     touch_start_time = None
 
-    print("TAP center button to toggle, HOLD+DRAG slider to change RPM\n")
+    print("TAP center button to toggle, HOLD+DRAG slider to change RPM (5 RPM steps)\n")
 
     try:
         while True:
-            if touch.is_touched() and touch.read_touch():
-                x, y = touch.get_point()
-                touch_state = touch.get_touch_state()
+            currently_touched = touch.is_touched()
 
-                # New touch started
-                if touch_state == touch.STATE_PRESSED:
+            if currently_touched and touch.read_touch():
+                x, y = touch.get_point()
+
+                # New touch started (transition from not touched to touched)
+                if not was_touched:
                     touch_start_pos = (x, y)
                     touch_start_time = time.time()
+                    was_touched = True
 
-                # Touch being held and dragged - SLIDER
-                elif touch_state == touch.STATE_HELD:
+                # Touch continuing (HOLD + DRAG for slider)
+                else:
                     action = map_touch(x, y)
                     if isinstance(action, int) and action != rpm:
                         rpm = action
@@ -188,27 +193,28 @@ def main():
                             avg = sum(frame_times[-10:]) / 10
                             print(f"Frame {frame_count}: {elapsed*1000:.1f}ms (avg: {avg*1000:.1f}ms, {1/avg:.1f} FPS)")
 
-                # Touch released - check for TAP (button)
-                elif touch_state == touch.STATE_RELEASED:
-                    if touch_start_pos and touch_start_time:
-                        duration = time.time() - touch_start_time
+            # Touch released
+            elif was_touched and not currently_touched:
+                if touch_start_pos and touch_start_time:
+                    duration = time.time() - touch_start_time
 
-                        # TAP detected (quick press/release)
-                        if duration < TAP_MAX_DURATION:
-                            action = map_touch(*touch_start_pos)
+                    # TAP detected (quick press/release < 300ms)
+                    if duration < TAP_MAX_DURATION:
+                        action = map_touch(*touch_start_pos)
 
-                            if action == "BUTTON":
-                                is_running = not is_running
-                                start = time.time()
-                                draw_ui(disp, rpm, is_running)
-                                elapsed = time.time() - start
-                                frame_times.append(elapsed)
-                                frame_count += 1
-                                print(f"Button tapped: {'RUNNING' if is_running else 'STOPPED'} ({elapsed*1000:.1f}ms)")
+                        if action == "BUTTON":
+                            is_running = not is_running
+                            start = time.time()
+                            draw_ui(disp, rpm, is_running)
+                            elapsed = time.time() - start
+                            frame_times.append(elapsed)
+                            frame_count += 1
+                            print(f"Button tapped: {'RUNNING' if is_running else 'STOPPED'} ({elapsed*1000:.1f}ms)")
 
-                    # Reset touch tracking
-                    touch_start_pos = None
-                    touch_start_time = None
+                # Reset touch tracking
+                was_touched = False
+                touch_start_pos = None
+                touch_start_time = None
 
             time.sleep(0.01)
 
