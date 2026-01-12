@@ -60,8 +60,8 @@ def map_touch(x, y):
     dy = y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    # Button in center (smaller than original 60px for precision)
-    if dist < 50:
+    # Button in center (45px for precision)
+    if dist < 45:
         return "BUTTON"
 
     # Slider - calculate RPM from angle
@@ -79,8 +79,8 @@ def map_touch(x, y):
 
     return None
 
-def draw_ui(disp, rpm, is_running):
-    """Draws the UI at 2x resolution for crisp anti-aliased graphics"""
+def draw_ui(disp, rpm, is_running, animate=False):
+    """Draws the UI at 2x resolution with optional animation"""
     start_time = time.time()
 
     # Render at high resolution (2x)
@@ -137,6 +137,12 @@ def draw_ui(disp, rpm, is_running):
     disp.show_image(img)
     elapsed = (time.time() - start_time) * 1000
     print(f"UI render: {elapsed:.1f}ms")
+
+def animate_transition(disp, rpm, from_running, to_running, frames=3):
+    """Smooth animation when starting/stopping motor"""
+    for _ in range(frames):
+        draw_ui(disp, rpm, to_running, animate=True)
+        time.sleep(0.03)  # 30ms per frame = 90ms total animation
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
@@ -201,6 +207,8 @@ def main():
     print("- Touch center = start/stop motor")
     print("- Touch outer ring = set RPM (5 RPM steps)")
 
+    last_slider_update = 0  # Throttle slider updates
+
     try:
         while True:
             try:
@@ -210,26 +218,41 @@ def main():
                         x, y = touch.get_point()
                         action = map_touch(x, y)
 
+                        # Debug: show what was detected
+                        if action is None:
+                            pass  # Outside active areas
+                        elif action == "BUTTON":
+                            print(f"Detected: BUTTON at ({x},{y}), motor_proc={'running' if motor_proc else 'None'}")
+                        else:
+                            print(f"Detected: SLIDER RPM={action} at ({x},{y}), motor_proc={'running' if motor_proc else 'None'}")
+
                         # Slider - change RPM immediately (only when motor not running)
                         if isinstance(action, int):
-                            if motor_proc is None and action != rpm:
-                                rpm = action
-                                print(f"RPM: {rpm}")
-                                draw_ui(disp, rpm, is_running=False)
+                            if motor_proc is None:
+                                if action != rpm:
+                                    # Throttle updates to prevent flooding
+                                    now = time.time()
+                                    if now - last_slider_update > 0.1:  # Max 10 updates/sec
+                                        rpm = action
+                                        print(f"→ RPM: {rpm}")
+                                        draw_ui(disp, rpm, is_running=False)
+                                        last_slider_update = now
+                            else:
+                                print(f"  (slider ignored - motor running)")
 
                         # Button - toggle motor
                         elif action == "BUTTON":
                             if motor_proc is None:
-                                # START
-                                print(f"START {rpm} RPM")
-                                draw_ui(disp, rpm, is_running=True)
+                                # START with animation
+                                print(f"→ START {rpm} RPM")
+                                animate_transition(disp, rpm, False, True)
                                 motor_proc = start_motor_process(rpm)
                             else:
-                                # STOP
-                                print("STOP")
+                                # STOP with animation
+                                print("→ STOP")
                                 stop_motor_process(motor_proc)
                                 motor_proc = None
-                                draw_ui(disp, rpm, is_running=False)
+                                animate_transition(disp, rpm, True, False)
                             # Debounce button
                             time.sleep(0.3)
 

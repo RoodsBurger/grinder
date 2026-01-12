@@ -63,8 +63,8 @@ def run_motor(target_rpm):
     steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
-    # Acceleration profile (also used for deceleration)
-    accel_time = 2.0
+    # Acceleration profile (also used for deceleration) - 1 second ramp
+    accel_time = 1.0
     accel_profile = driver.calculate_accel_profile(target_rpm, accel_time, steps_rev)
     decel_profile = list(reversed(accel_profile))
 
