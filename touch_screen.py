@@ -3,6 +3,7 @@ CST816T Touch Controller Driver
 I2C interface for touchscreen
 """
 import time
+import math
 import smbus2
 import RPi.GPIO as GPIO
 
@@ -22,34 +23,74 @@ class TouchScreen:
         self.y = 0
         self.touched = False
 
+        # Touch filtering and debouncing
+        self.debounce_time = 0.035  # 35ms debounce
+        self.last_touch_time = 0
+        self.hysteresis = 5  # pixels - ignore moves smaller than this
+        self.last_x = 0
+        self.last_y = 0
+
+        # Touch state machine
+        self.STATE_IDLE = 0
+        self.STATE_PRESSED = 1
+        self.STATE_HELD = 2
+        self.STATE_RELEASED = 3
+        self.touch_state = self.STATE_IDLE
+        self.press_start_time = 0
+
+        # Coordinate filtering (simple moving average)
+        self.filter_size = 3
+        self.x_history = []
+        self.y_history = []
+
+        # I2C retry configuration
+        self.max_retries = 3
+        self.retry_delay = 0.001  # 1ms between retries
+
     def init(self):
-        """Initialize touch controller"""
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-
-        # Setup pins
-        GPIO.setup(self.TP_RST, GPIO.OUT)
-        GPIO.setup(self.TP_INT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-        # Reset touch controller
-        self.reset()
-
-        # Initialize I2C
+        """Initialize touch controller with robust error handling."""
         try:
-            self.bus = smbus2.SMBus(self.i2c_bus)
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
 
-            # Check if device is present
-            if self.who_am_i():
+            # Setup pins
+            GPIO.setup(self.TP_RST, GPIO.OUT)
+            GPIO.setup(self.TP_INT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+            # Reset touch controller
+            self.reset()
+
+            # Initialize I2C
+            try:
+                self.bus = smbus2.SMBus(self.i2c_bus)
+            except Exception as e:
+                print(f"ERROR: Failed to open I2C bus {self.i2c_bus}: {e}")
+                return False
+
+            # Check if device is present (with retries)
+            device_found = False
+            for attempt in range(3):
+                if self.who_am_i():
+                    device_found = True
+                    break
+                time.sleep(0.05)
+
+            if device_found:
                 print("Touch controller detected: CST816T")
-                rev = self.read_revision()
-                print(f"Revision: {rev}")
+                try:
+                    rev = self.read_revision()
+                    print(f"Revision: 0x{rev:02X}")
+                except:
+                    print("Warning: Could not read revision")
+
                 self.stop_sleep()
                 return True
             else:
-                print("Warning: Touch controller not detected")
+                print("ERROR: Touch controller not detected (expected chip ID 0xB5)")
                 return False
+
         except Exception as e:
-            print(f"Error initializing touch: {e}")
+            print(f"ERROR: Touch initialization failed: {e}")
             return False
 
     def reset(self):
@@ -81,28 +122,148 @@ class TouchScreen:
         except:
             pass
 
+    def validate_coordinates(self, x, y):
+        """
+        Validate touch coordinates are within display bounds.
+        CST816T can return invalid coordinates on noise/vibration.
+
+        Returns: (valid, x, y) tuple. If invalid, returns (False, 0, 0)
+        """
+        # Display is 240x240
+        if x < 0 or x >= 240 or y < 0 or y >= 240:
+            return False, 0, 0
+
+        # Check for common invalid values (all 0xFFF or 0x000)
+        if (x == 0 and y == 0) or (x >= 4095 or y >= 4095):
+            return False, 0, 0
+
+        return True, x, y
+
+    def filter_coordinates(self, x, y):
+        """
+        Apply moving average filter to reduce jitter.
+
+        Args: x, y - raw coordinates
+        Returns: (filtered_x, filtered_y)
+        """
+        # Add to history
+        self.x_history.append(x)
+        self.y_history.append(y)
+
+        # Keep only last N samples
+        if len(self.x_history) > self.filter_size:
+            self.x_history.pop(0)
+        if len(self.y_history) > self.filter_size:
+            self.y_history.pop(0)
+
+        # Calculate average
+        avg_x = sum(self.x_history) // len(self.x_history)
+        avg_y = sum(self.y_history) // len(self.y_history)
+
+        return avg_x, avg_y
+
+    def check_hysteresis(self, x, y):
+        """
+        Check if movement exceeds hysteresis threshold.
+        Prevents jitter from reporting tiny movements.
+
+        Returns: True if movement is significant, False if within hysteresis
+        """
+        dx = abs(x - self.last_x)
+        dy = abs(y - self.last_y)
+        dist = math.sqrt(dx*dx + dy*dy)
+
+        return dist >= self.hysteresis
+
     def read_touch(self):
-        """Read touch coordinates"""
-        try:
-            # Read 6 bytes starting from register 0x02
-            data = self.bus.read_i2c_block_data(self.i2c_addr, 0x02, 6)
+        """
+        Read touch coordinates with debouncing, filtering, and error handling.
 
-            # Number of touch points
-            num_points = data[0] & 0x0F
+        Returns: True if valid touch detected, False otherwise.
+        Updates self.x, self.y, self.touched with filtered coordinates.
+        """
+        current_time = time.time()
 
-            if num_points > 0:
-                # Extract X coordinate
-                self.x = ((data[1] & 0x0F) << 8) | data[2]
-                # Extract Y coordinate
-                self.y = ((data[3] & 0x0F) << 8) | data[4]
-                self.touched = True
-                return True
-            else:
+        # Debounce check - don't read too frequently
+        if current_time - self.last_touch_time < self.debounce_time:
+            return False
+
+        # Try reading with retry logic
+        for attempt in range(self.max_retries):
+            try:
+                # Read 6 bytes starting from register 0x02
+                data = self.bus.read_i2c_block_data(self.i2c_addr, 0x02, 6)
+
+                # Number of touch points
+                num_points = data[0] & 0x0F
+
+                if num_points > 0:
+                    # Extract X coordinate
+                    raw_x = ((data[1] & 0x0F) << 8) | data[2]
+                    # Extract Y coordinate
+                    raw_y = ((data[3] & 0x0F) << 8) | data[4]
+
+                    # Validate coordinates
+                    valid, x, y = self.validate_coordinates(raw_x, raw_y)
+
+                    if not valid:
+                        # Invalid data, likely noise/vibration
+                        self.touched = False
+                        return False
+
+                    # Apply filtering
+                    filtered_x, filtered_y = self.filter_coordinates(x, y)
+
+                    # Check hysteresis - only report if movement is significant
+                    if self.touch_state == self.STATE_HELD:
+                        if not self.check_hysteresis(filtered_x, filtered_y):
+                            # Movement too small, ignore
+                            return False
+
+                    # Update state
+                    self.x = filtered_x
+                    self.y = filtered_y
+                    self.last_x = filtered_x
+                    self.last_y = filtered_y
+                    self.touched = True
+                    self.last_touch_time = current_time
+
+                    # State machine transition
+                    if self.touch_state == self.STATE_IDLE:
+                        self.touch_state = self.STATE_PRESSED
+                        self.press_start_time = current_time
+                    elif self.touch_state == self.STATE_PRESSED:
+                        self.touch_state = self.STATE_HELD
+
+                    return True
+                else:
+                    # No touch detected
+                    if self.touch_state != self.STATE_IDLE:
+                        self.touch_state = self.STATE_RELEASED
+                        # Clear filter history on release
+                        self.x_history.clear()
+                        self.y_history.clear()
+
+                    self.touched = False
+                    return False
+
+            except OSError as e:
+                # I2C error - retry
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                else:
+                    # All retries failed
+                    print(f"Touch I2C error after {self.max_retries} retries: {e}")
+                    self.touched = False
+                    return False
+            except Exception as e:
+                # Unexpected error
+                print(f"Touch read error: {e}")
                 self.touched = False
                 return False
-        except:
-            self.touched = False
-            return False
+
+        return False
 
     def get_point(self):
         """Get current touch point"""
@@ -111,6 +272,36 @@ class TouchScreen:
     def is_touched(self):
         """Check if screen is currently touched"""
         return GPIO.input(self.TP_INT) == GPIO.LOW
+
+    def get_touch_state(self):
+        """
+        Get current touch state.
+        Returns: STATE_IDLE, STATE_PRESSED, STATE_HELD, or STATE_RELEASED
+        """
+        # Reset released state to idle after reading
+        if self.touch_state == self.STATE_RELEASED:
+            self.touch_state = self.STATE_IDLE
+            return self.STATE_RELEASED
+
+        return self.touch_state
+
+    def get_touch_duration(self):
+        """
+        Get duration of current touch in seconds.
+        Returns: 0 if not touched, otherwise duration since press.
+        """
+        if self.touch_state in [self.STATE_PRESSED, self.STATE_HELD]:
+            return time.time() - self.press_start_time
+        return 0
+
+    def is_new_press(self):
+        """
+        Check if this is a new press (just transitioned from IDLE to PRESSED).
+        Useful for button clicks vs. drag detection.
+
+        Returns: True if newly pressed in this read cycle.
+        """
+        return self.touch_state == self.STATE_PRESSED
 
     def cleanup(self):
         """Clean up resources"""
