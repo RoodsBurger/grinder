@@ -47,6 +47,7 @@ SCS_PIN = 8
 DIR_PIN = 24
 STEP_PIN = 25
 SLEEP_PIN = 7
+LCD_CS_PIN = 22  # Must disable LCD to prevent SPI MISO conflicts
 
 # SPI Configuration
 SPI_BUS = 0
@@ -130,6 +131,13 @@ def run_motor(target_rpm):
     print("\n[*] Initializing GPIO...")
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
+
+    # CRITICAL: Disable LCD to prevent SPI MISO conflicts (like comprehensive test)
+    GPIO.setup(LCD_CS_PIN, GPIO.OUT)
+    GPIO.output(LCD_CS_PIN, GPIO.HIGH)
+    print("    [OK] LCD disabled (CS HIGH)")
+
+    # Setup motor pins
     GPIO.setup(SCS_PIN, GPIO.OUT)
     GPIO.setup(STEP_PIN, GPIO.OUT)
     GPIO.setup(DIR_PIN, GPIO.OUT)
@@ -139,6 +147,20 @@ def run_motor(target_rpm):
     GPIO.output(STEP_PIN, GPIO.LOW)
     GPIO.output(DIR_PIN, GPIO.LOW)
     GPIO.output(SLEEP_PIN, GPIO.LOW)  # Start with chip asleep
+
+    # CRITICAL: Ensure SPI bus is closed first (LCD or previous run may have left it open)
+    print("[*] Ensuring SPI bus is closed...")
+    try:
+        import spidev
+        spi_test = spidev.SpiDev()
+        try:
+            spi_test.open(0, 0)
+            spi_test.close()
+            print("    [OK] SPI bus was open, now closed")
+        except:
+            print("    [OK] SPI bus was already closed")
+    except Exception as e:
+        print(f"    [!] Could not check SPI state: {e}")
 
     # Initialize SPI
     print("[*] Initializing SPI at 500kHz...")
