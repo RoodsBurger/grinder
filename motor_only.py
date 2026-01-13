@@ -3,7 +3,8 @@
 Standalone motor control - runs in separate process
 No display, no touch - just motor operation
 
-MOTOR CONFIGURATION: J6 - Torque + Quiet Compromise v1
+MOTOR CONFIGURATION: Loaded from motor_configs.json (J6 config)
+J6 - Torque + Quiet Compromise v1:
 - Current: 5000mA (119% motor rated - from comprehensive testing)
 - Microstepping: 1/32 (very smooth)
 - PWM Frequency: 62.5kHz (0x020 - above audible)
@@ -22,6 +23,7 @@ import os
 import signal
 import spidev
 import RPi.GPIO as GPIO
+import json
 
 # DRV8711 Register addresses
 REG_CTRL = 0x00
@@ -58,17 +60,18 @@ spi = None
 # Motor Direction
 MOTOR_DIRECTION = 1
 
-# J6 Configuration (from comprehensive test)
-J6_CURRENT_MA = 5000  # Target current in mA
-J6_CTRL_BASE = 0xC28  # 1/32 step, Gain will be calculated
-J6_CONFIG = {
-    'off': 0x020,       # 62.5kHz PWM
-    'blank': 0x180,     # ABT enabled
-    'decay': 0x110,     # Slow/Mixed decay
-    'drive': 0xF59,     # 200/400mA MAX drive
-    'stall': 0x040,     # Stall detection
-    'microstep': 32     # 1/32 microstepping
-}
+# Load J6 Configuration from JSON file
+def load_j6_config():
+    """Load the optimal J6 configuration from motor_configs.json"""
+    config_path = os.path.join(os.path.dirname(__file__), 'motor_configs.json')
+    with open(config_path, 'r') as f:
+        configs = json.load(f)
+    return configs['J6']
+
+# Load J6 config at startup
+J6_CONFIG = load_j6_config()
+J6_CURRENT_MA = J6_CONFIG['current_ma']
+J6_CTRL_BASE = J6_CONFIG['ctrl_base']
 
 def calculate_torque_register(current_ma):
     """
@@ -267,7 +270,7 @@ def run_motor(target_rpm):
 
     # Calculate delays (using J6 microstepping)
     steps_rev = 200
-    microsteps = J6_CONFIG['microstep']
+    microsteps = J6_CONFIG['microstep_divider']
     steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
