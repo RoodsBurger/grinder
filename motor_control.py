@@ -227,11 +227,7 @@ def start_motor_process(rpm, disp):
     """Start motor process (close LCD SPI first to avoid conflict)"""
     # CRITICAL: Close LCD's SPI before motor process opens it
     # Both use SPI bus 0, device 0 and can't be open simultaneously
-    try:
-        disp.spi.close()
-        print("[*] Closed LCD SPI before motor start")
-    except Exception as e:
-        print(f"WARNING: Failed to close LCD SPI: {e}")
+    disp.close_spi_for_motor()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     motor_script = os.path.join(script_dir, "motor_only.py")
@@ -261,17 +257,17 @@ def stop_motor_process(proc, disp):
         print(f"ERROR: Failed to disable motor: {e}")
 
     # Reopen LCD SPI (motor closed it when done)
-    try:
-        disp.spi.open(disp.spi_bus, disp.spi_device)
-        disp.spi.max_speed_hz = 80000000  # 80MHz for LCD
-        disp.spi.mode = 0b00
-        print("[*] Reopened LCD SPI after motor stop")
-    except Exception as e:
-        print(f"ERROR: Failed to reopen LCD SPI: {e}")
+    disp.reopen_spi_after_motor()
 
 # --- MAIN LOOP ---
 
 def main():
+    # Check for root/sudo (required for GPIO/I2C/SPI access)
+    if os.geteuid() != 0:
+        print("ERROR: This script must be run with sudo!")
+        print("Usage: sudo python3 motor_control.py")
+        return
+
     # Initialize GPIO for motor sleep pin control
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
@@ -322,11 +318,11 @@ def main():
                         # Button - toggle motor
                         elif action == "BUTTON":
                             if motor_proc is None:
-                                # START
-                                motor_proc = start_motor_process(rpm, disp)
+                                # START - draw UI BEFORE closing SPI
                                 draw_ui(disp, rpm, is_running=True)
+                                motor_proc = start_motor_process(rpm, disp)
                             else:
-                                # STOP
+                                # STOP - reopen SPI, then draw
                                 stop_motor_process(motor_proc, disp)
                                 motor_proc = None
                                 draw_ui(disp, rpm, is_running=False)

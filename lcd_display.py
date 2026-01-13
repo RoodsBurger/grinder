@@ -24,9 +24,7 @@ class LCD_1inch28:
         self.spi = spidev.SpiDev()
         self.spi_bus = 0
         self.spi_device = 0
-
-        # Track if SPI needs reset (set by external code after motor runs)
-        self.spi_corrupted = False
+        self.spi_open = False  # Track if SPI is currently open
 
     def module_init(self):
         """Initialize GPIO and SPI"""
@@ -43,6 +41,7 @@ class LCD_1inch28:
         self.spi.open(self.spi_bus, self.spi_device)
         self.spi.max_speed_hz = 80000000  # 80MHz (GC9A01 max spec)
         self.spi.mode = 0b00  # SPI Mode 0
+        self.spi_open = True
 
         # Turn on backlight
         GPIO.output(self.BL_PIN, GPIO.HIGH)
@@ -55,11 +54,35 @@ class LCD_1inch28:
     def module_exit(self):
         """Clean up GPIO and SPI"""
         try:
-            self.spi.close()
+            if self.spi_open:
+                self.spi.close()
+                self.spi_open = False
             GPIO.output(self.BL_PIN, GPIO.LOW)
             GPIO.cleanup()
         except:
             pass
+
+    def close_spi_for_motor(self):
+        """Close SPI so motor subprocess can use it"""
+        if self.spi_open:
+            try:
+                self.spi.close()
+                self.spi_open = False
+                print("[*] LCD SPI closed for motor use")
+            except Exception as e:
+                print(f"WARNING: Failed to close LCD SPI: {e}")
+
+    def reopen_spi_after_motor(self):
+        """Reopen SPI after motor subprocess finishes"""
+        if not self.spi_open:
+            try:
+                self.spi.open(self.spi_bus, self.spi_device)
+                self.spi.max_speed_hz = 80000000  # 80MHz for LCD
+                self.spi.mode = 0b00
+                self.spi_open = True
+                print("[*] LCD SPI reopened after motor stop")
+            except Exception as e:
+                print(f"ERROR: Failed to reopen LCD SPI: {e}")
 
     def reset(self):
         """Hardware reset"""
