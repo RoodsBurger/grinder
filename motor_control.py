@@ -332,17 +332,32 @@ def main():
                 # Check if motor process ended
                 if motor_proc and motor_proc.poll() is not None:
                     exit_code = motor_proc.returncode
-                    if exit_code != 0:
-                        print(f"ERROR: Motor process crashed with code {exit_code}")
-                        # Print stderr for debugging
+
+                    # Always print subprocess output for debugging
+                    print(f"\n[!] Motor process ended with code {exit_code}")
+
+                    # Try to read any output
+                    try:
+                        stdout_output = motor_proc.stdout.read()
+                        if stdout_output:
+                            print(f"Motor stdout:\n{stdout_output}")
+                    except:
+                        pass
+
+                    try:
                         stderr_output = motor_proc.stderr.read()
                         if stderr_output:
-                            print(f"Motor stderr: {stderr_output}")
+                            print(f"Motor stderr:\n{stderr_output}")
+                    except:
+                        pass
 
                     # Reopen LCD SPI and disable motor
                     stop_motor_process(None, disp)  # None = already exited
                     motor_proc = None
                     draw_ui(disp, rpm, is_running=False)
+
+                    # Prevent rapid cycling - wait a bit
+                    time.sleep(0.5)
 
                 time.sleep(0.005)  # 200Hz update rate
 
