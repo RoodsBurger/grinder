@@ -19,7 +19,7 @@ SLEEP_PIN = 7
 # --- CONFIGURATION ---
 MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (8000mA, 100kHz PWM, 1/64 step)
 MIN_RPM = 0
-MAX_RPM = 600
+MAX_RPM = 400
 STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
 
 # Display Settings - Render at 2x for crispness

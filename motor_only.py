@@ -229,7 +229,7 @@ if __name__ == "__main__":
         print("Usage: motor_only.py <RPM> [CONFIG_ID]")
         print("")
         print("Arguments:")
-        print("  RPM        - Target speed (0-600)")
+        print("  RPM        - Target speed (0-400)")
         print("  CONFIG_ID  - Motor configuration ID (default: J6)")
         print("")
         print("Examples:")
@@ -241,8 +241,8 @@ if __name__ == "__main__":
     try:
         # Parse RPM
         rpm = int(sys.argv[1])
-        if rpm < 0 or rpm > 600:
-            print("ERROR: RPM must be 0-600")
+        if rpm < 0 or rpm > 400:
+            print("ERROR: RPM must be 0-400")
             sys.exit(1)
 
         # Parse optional config ID (default to J6)
