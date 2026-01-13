@@ -118,6 +118,15 @@ def run_motor(target_rpm):
     print(f"  Motor Control Starting - Target: {target_rpm} RPM")
     print(f"{'='*60}")
 
+    # CRITICAL: Power cycle the motor driver chip to clear any latched faults
+    print("\n[*] Power cycling motor driver to clear latched faults...")
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(SLEEP_PIN, GPIO.OUT)
+    GPIO.output(SLEEP_PIN, GPIO.LOW)   # Power down
+    time.sleep(0.1)  # Wait for chip to fully power down
+    GPIO.output(SLEEP_PIN, GPIO.HIGH)  # Power up
+    time.sleep(0.1)  # Wait for chip to boot
+
     # Initialize motor driver
     driver = HighPowerStepperDriver(
         spi_bus=0, spi_device=0,
@@ -125,7 +134,7 @@ def run_motor(target_rpm):
     )
 
     # Configure driver with J6 optimized settings
-    print("\n[*] Configuring DRV8711 driver with J6 settings...")
+    print("[*] Configuring DRV8711 driver with J6 settings...")
     driver.reset_settings()
     driver.set_current_milliamps(5000)  # 119% rated - optimal torque/noise balance
     driver.set_step_mode(32)  # 1/32 microstepping for smoothest, quietest operation
@@ -136,23 +145,36 @@ def run_motor(target_rpm):
     driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX (strong gate drive)
     driver._write_reg(REG_STALL, 0x040)   # Default stall detection
     # BLANK already set to 0x180 (ABT enabled) by reset_settings()
-    time.sleep(0.01)  # Let settings settle
+    time.sleep(0.05)  # Let settings settle
 
     # Verify configuration by reading registers
     can_read_spi = verify_registers(driver)
 
-    # Clear any old faults from previous runs BEFORE checking status
+    # Clear faults multiple times - sometimes chip needs multiple writes
     if can_read_spi:
-        print("\n[*] Clearing any old faults...")
-        driver.clear_faults()
-        time.sleep(0.01)
+        print("\n[*] Clearing faults (multiple attempts)...")
+        for attempt in range(3):
+            driver.clear_faults()
+            time.sleep(0.02)
+            status = driver._read_reg(REG_STATUS)
+            critical_faults = status & 0x3F  # Bits 0-5 are critical
+            if critical_faults == 0:
+                print(f"    [OK] Faults cleared on attempt {attempt+1}")
+                break
+            print(f"    [i] Attempt {attempt+1}: STATUS still 0x{status:03X}")
+        else:
+            print(f"    [!] WARNING: Could not clear all faults after 3 attempts")
 
     # Check status after clearing faults
     if can_read_spi:
-        print("[*] Checking STATUS register...")
+        print("[*] Final STATUS check...")
         if not check_status(driver):
-            print("[!] CRITICAL: Faults detected even after clearing!")
-            print("[!] Check wiring and power supply")
+            print("[!] CRITICAL: Hardware faults persist!")
+            print("[!] Possible causes:")
+            print("    - Power supply voltage too low or unstable")
+            print("    - Motor winding short circuit or open circuit")
+            print("    - Loose wiring connections")
+            print("    - Driver chip actually overheated")
             driver.disable_driver()
             return
 
