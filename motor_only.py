@@ -157,30 +157,28 @@ def run_motor(target_rpm):
     driver.set_current_milliamps(5000)  # 119% rated - optimal torque/noise balance
     driver.set_step_mode(32)  # 1/32 microstepping for smoothest, quietest operation
 
-    # Override defaults with J6 optimizations (write and verify each)
+    # Override defaults with J6 optimizations
     print("[*] Writing J6 register overrides...")
     driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM (quieter than 41.7kHz)
     driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay (better torque, still quiet)
     driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX (strong gate drive)
-    driver._write_reg(REG_STALL, 0x040)   # Default stall detection
-    # BLANK already set to 0x180 (ABT enabled) by reset_settings()
+    # STALL and BLANK already set by reset_settings() - don't override
     time.sleep(0.05)  # Let settings settle
 
     # Verify configuration by reading registers
     can_read_spi = verify_registers(driver)
 
-    # CRITICAL: Check if register writes actually worked
+    # CRITICAL: Verify J6 register writes worked (only check what we wrote)
     if can_read_spi:
+        print("[*] Verifying J6 register writes...")
         off_val = driver._read_reg(REG_OFF)
         decay_val = driver._read_reg(REG_DECAY)
         drive_val = driver._read_reg(REG_DRIVE)
-        stall_val = driver._read_reg(REG_STALL)
 
         errors = []
         if off_val != 0x020: errors.append(f"OFF: wrote 0x020, read 0x{off_val:03X}")
         if decay_val != 0x110: errors.append(f"DECAY: wrote 0x110, read 0x{decay_val:03X}")
         if drive_val != 0xF59: errors.append(f"DRIVE: wrote 0xF59, read 0x{drive_val:03X}")
-        if stall_val != 0x040: errors.append(f"STALL: wrote 0x040, read 0x{stall_val:03X}")
 
         if errors:
             print("\n[!] CRITICAL: SPI WRITE VERIFICATION FAILED!")
@@ -195,7 +193,7 @@ def run_motor(target_rpm):
             driver.disable_driver()
             return
         else:
-            print("    [OK] All register writes verified")
+            print("    [OK] All J6 register writes verified")
 
     # Clear faults multiple times - sometimes chip needs multiple writes
     if can_read_spi:
