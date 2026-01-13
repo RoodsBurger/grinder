@@ -65,7 +65,7 @@ REG_STALL = 0x07
 spi = None
 SPI_BUS = 0
 SPI_DEVICE = 0
-SPI_SPEED = 4000000  # 4MHz (DRV8711 max is 5MHz)
+SPI_SPEED = 500000  # 500kHz (matches Pololu Arduino library)
 
 # ============================================================================
 # GLOBAL STATE
