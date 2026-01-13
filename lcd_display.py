@@ -242,3 +242,25 @@ class LCD_1inch28:
         """Clear the screen with a solid color"""
         image = Image.new('RGB', (self.width, self.height), color)
         self.show_image(image)
+
+    def sleep_display(self):
+        """Enter sleep mode - turn off display and backlight"""
+        try:
+            GPIO.output(self.BL_PIN, GPIO.LOW)  # Backlight off
+            self.write_cmd(0x28)  # Display off
+            time.sleep(0.02)
+            self.write_cmd(0x10)  # Sleep in
+            time.sleep(0.12)
+        except:
+            pass
+
+    def wake_display(self):
+        """Wake from sleep mode - turn on display and backlight"""
+        try:
+            self.write_cmd(0x11)  # Sleep out
+            time.sleep(0.12)
+            self.write_cmd(0x29)  # Display on
+            time.sleep(0.02)
+            GPIO.output(self.BL_PIN, GPIO.HIGH)  # Backlight on
+        except:
+            pass

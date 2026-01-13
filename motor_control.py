@@ -20,6 +20,7 @@ SLEEP_PIN = 7
 MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (8000mA, 100kHz PWM, 1/64 step)
 MIN_RPM = 0
 MAX_RPM = 300
+STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
 
 # Display Settings - Render at 2x for crispness
 SCALE = 2
@@ -221,15 +222,37 @@ def main():
 
     rpm = 200
     motor_proc = None
+    last_activity_time = time.time()
+    is_standby = False
 
     draw_ui(disp, rpm, is_running=False)
 
     try:
         while True:
             try:
-                # Simple immediate response
+                current_time = time.time()
+
+                # Check for standby timeout (only if motor not running)
+                if not is_standby and motor_proc is None:
+                    if current_time - last_activity_time > STANDBY_TIMEOUT:
+                        disp.sleep_display()
+                        is_standby = True
+
+                # Check for touch
                 if touch.is_touched():
                     if touch.read_touch():
+                        # Wake from standby if needed
+                        if is_standby:
+                            disp.wake_display()
+                            is_standby = False
+                            last_activity_time = current_time
+                            draw_ui(disp, rpm, is_running=(motor_proc is not None))
+                            time.sleep(0.2)  # Debounce wake touch
+                            continue
+
+                        # Normal operation - update activity time
+                        last_activity_time = current_time
+
                         x, y = touch.get_point()
                         action = map_touch(x, y, debug=False)
 
@@ -270,7 +293,14 @@ def main():
 
                     stop_motor_process(None, disp)
                     motor_proc = None
+
+                    # Wake display if in standby
+                    if is_standby:
+                        disp.wake_display()
+                        is_standby = False
+
                     draw_ui(disp, rpm, is_running=False)
+                    last_activity_time = current_time
                     time.sleep(0.5)
 
                 time.sleep(0.005)  # 200Hz update rate
@@ -286,6 +316,9 @@ def main():
     finally:
         if motor_proc:
             stop_motor_process(motor_proc, disp)
+        # Wake display on exit so user can see it stopped
+        if is_standby:
+            disp.wake_display()
         try:
             GPIO.output(SLEEP_PIN, GPIO.LOW)
         except:
