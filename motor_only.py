@@ -146,7 +146,12 @@ def run_motor(target_rpm):
     GPIO.output(SCS_PIN, GPIO.LOW)  # CS inactive (LOW for Pololu active-HIGH)
     GPIO.output(STEP_PIN, GPIO.LOW)
     GPIO.output(DIR_PIN, GPIO.LOW)
-    GPIO.output(SLEEP_PIN, GPIO.LOW)  # Start with chip asleep
+
+    # CRITICAL: Set SLEEP HIGH immediately (matches pololu_lib - chip always awake)
+    # DRV8711 needs to be awake BEFORE SPI communication
+    print("[*] Waking up driver...")
+    GPIO.output(SLEEP_PIN, GPIO.HIGH)
+    time.sleep(0.01)  # 10ms settling time (longer than pololu_lib's 1ms)
 
     # CRITICAL: Ensure SPI bus is closed first (LCD or previous run may have left it open)
     print("[*] Ensuring SPI bus is closed...")
@@ -162,28 +167,37 @@ def run_motor(target_rpm):
     except Exception as e:
         print(f"    [!] Could not check SPI state: {e}")
 
-    # Initialize SPI
+    # Initialize SPI (after chip is awake)
     print("[*] Initializing SPI at 500kHz...")
     init_spi()
 
-    # Wake up driver (matches comprehensive test)
-    print("[*] Waking up driver...")
-    GPIO.output(SLEEP_PIN, GPIO.HIGH)
-    time.sleep(0.001)
+    # CRITICAL: Write default registers first (matches pololu_lib initialization)
+    # This ensures chip is in known state before applying J6 config
+    print("[*] Initializing chip with default registers...")
+    write_reg(REG_TORQUE, 0x1FF)  # Default torque
+    write_reg(REG_OFF, 0x030)     # 41.7kHz PWM default
+    write_reg(REG_BLANK, 0x180)   # ABT enabled default
+    write_reg(REG_DECAY, 0x510)   # Auto-Mixed default
+    write_reg(REG_DRIVE, 0xA59)   # 150/300mA default
+    write_reg(REG_STALL, 0x040)   # Default stall
+    write_reg(REG_CTRL, 0xC28)    # 1/32 step, Gain 5, disabled
+    time.sleep(0.01)  # Let defaults settle
 
-    # Configure driver with J6 EXACT settings (from comprehensive test)
-    # CRITICAL: Write ALL registers in order (matches comprehensive test pattern)
-    print("[*] Writing J6 configuration registers...")
-    write_reg(REG_TORQUE, J6_CONFIG['torque'])
-    write_reg(REG_OFF, J6_CONFIG['off'])
-    write_reg(REG_BLANK, J6_CONFIG['blank'])
-    write_reg(REG_DECAY, J6_CONFIG['decay'])
-    write_reg(REG_DRIVE, J6_CONFIG['drive'])
-    write_reg(REG_STALL, J6_CONFIG['stall'])
-    write_reg(REG_CTRL, J6_CONFIG['ctrl'])
+    # Clear any faults from startup
+    print("[*] Clearing startup faults...")
+    write_reg(REG_STATUS, 0x000)
+    time.sleep(0.01)
 
-    # CRITICAL: Clear faults IMMEDIATELY after configuration (comprehensive test pattern)
-    print("[*] Clearing faults...")
+    # Now apply J6 overrides (only what's different from defaults)
+    print("[*] Applying J6 configuration overrides...")
+    write_reg(REG_TORQUE, J6_CONFIG['torque'])  # 5000mA (vs 0x1FF default)
+    write_reg(REG_OFF, J6_CONFIG['off'])        # 62.5kHz (vs 41.7kHz default)
+    write_reg(REG_DECAY, J6_CONFIG['decay'])    # Slow/Mixed (vs Auto-Mixed default)
+    write_reg(REG_DRIVE, J6_CONFIG['drive'])    # 200/400mA MAX (vs 150/300mA default)
+    time.sleep(0.01)  # Let J6 config settle
+
+    # Clear faults again after configuration
+    print("[*] Clearing faults after configuration...")
     write_reg(REG_STATUS, 0x000)
     time.sleep(0.01)
 
