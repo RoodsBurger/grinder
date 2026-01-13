@@ -322,22 +322,36 @@ def run_test(config, rpm=200, duration=5):
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
 
-    # Apply configuration
-    driver.reset_settings()
+    # Configure current first (this sets ISGAIN and TORQUE)
     driver.set_current_milliamps(config["current"])
-    driver.set_step_mode(config["step_mode"])
 
-    # Write custom registers INSTEAD of using set_step_mode()
-    # This ensures we have full control over all register values
-    if "CTRL" in config["regs"]:
-        driver._write_reg(0x00, config["regs"]["CTRL"])    # CTRL register
-    driver._write_reg(0x02, config["regs"]["OFF"])     # OFF register
-    driver._write_reg(0x03, config["regs"]["BLANK"])   # BLANK register
-    driver._write_reg(0x04, config["regs"]["DECAY"])   # DECAY register
-    driver._write_reg(0x06, config["regs"]["DRIVE"])   # DRIVE register
+    # Preserve ISGAIN from set_current_milliamps, merge with custom step mode
+    # CTRL bits: [11:10]=Reserved, [9:8]=ISGAIN, [7]=DTIME, [6:3]=MODE, [2:1]=EXSTALL, [0]=ENBL
+    isgain_bits = driver.regs[0x00] & 0x0300  # Extract ISGAIN (bits 9:8)
+    custom_ctrl = config["regs"].get("CTRL", 0xC10)
+    merged_ctrl = (custom_ctrl & ~0x0300) | isgain_bits  # Merge: custom mode + calculated ISGAIN
+
+    # Update cache with custom register values
+    # CRITICAL: Must update cache because enable_driver() reads from self.regs[]
+    driver.regs[0x00] = merged_ctrl
+    driver.regs[0x02] = config["regs"]["OFF"]
+    driver.regs[0x03] = config["regs"]["BLANK"]
+    driver.regs[0x04] = config["regs"]["DECAY"]
+    driver.regs[0x06] = config["regs"]["DRIVE"]
+
+    # Update step_mode_val for correct RPM calculations
+    step_map = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6, 128: 7, 256: 8}
+    driver.step_mode_val = step_map.get(config["step_mode"], 4)
+
+    # Write all registers to hardware (except CTRL which has ENBL bit clear)
+    driver._write_reg(0x02, driver.regs[0x02])  # OFF
+    driver._write_reg(0x03, driver.regs[0x03])  # BLANK
+    driver._write_reg(0x04, driver.regs[0x04])  # DECAY
+    driver._write_reg(0x06, driver.regs[0x06])  # DRIVE
+    driver._write_reg(0x00, driver.regs[0x00])  # CTRL (write last, before enable)
 
     GPIO.output(DIR_PIN, 1)
-    driver.enable_driver()
+    driver.enable_driver()  # Sets ENBL bit in CTRL using cached value
     driver.clear_faults()
 
     # VERIFICATION: Read back registers BEFORE closing SPI
