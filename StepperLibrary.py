@@ -126,7 +126,7 @@ class StepperMotor:
         self._driver = _DRV8711(cs_pin)
 
         # Internal State
-        self._ctrl = 0xC10     # Default Control Register
+        self._ctrl = 0xC28     # Default Control Register (1/32 step)
         self._torque = 0x1FF   # Default Torque Register
         self._enabled = False
         self._running = False
@@ -135,7 +135,7 @@ class StepperMotor:
         self._init_registers()
 
         # Apply Defaults
-        self.set_microstep_mode(MicrostepMode.EIGHTH_STEP)
+        self.set_microstep_mode(MicrostepMode.THIRTYSECOND_STEP)
         self.set_torque_percent(100)
 
     def _init_registers(self):

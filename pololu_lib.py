@@ -47,7 +47,7 @@ class HighPowerStepperDriver:
         # Reference: https://github.com/pololu/high-power-stepper-driver-arduino
         # Based on combo_pololu_32step testing - quietest proven configuration
         self.regs = {
-            REG_CTRL:   0xC10, # Gain 5, 1/4 Step default (use set_step_mode() to change)
+            REG_CTRL:   0xC28, # Gain 5, 1/32 Step default (bits 6-3 = 0101)
             REG_TORQUE: 0x1FF, # Default torque (recalculated by set_current_milliamps)
             REG_OFF:    0x030, # 24µs = 41.7kHz PWM (ABOVE audible - Pololu default)
             REG_BLANK:  0x180, # 2.56µs + ABT enabled (bit 8) for smooth microstepping
@@ -57,8 +57,8 @@ class HighPowerStepperDriver:
         }
 
         # Track current step mode index (0-8) for RPM calculations
-        # Default 0xC10 has bits 6-3 set to 0010 (2), which is 1/4 step
-        self.step_mode_val = 2
+        # Default 0xC28 has bits 6-3 set to 0101 (5), which is 1/32 step
+        self.step_mode_val = 5
 
         self._setup_gpio()
         self._setup_spi()
@@ -155,7 +155,7 @@ class HighPowerStepperDriver:
             GPIO.output(self.reset_pin, GPIO.LOW)
 
         # Restore default values (optimized for quiet operation)
-        self.regs[REG_CTRL]   = 0xC10  # Gain 5, 1/4 step, disabled
+        self.regs[REG_CTRL]   = 0xC28  # Gain 5, 1/32 step, disabled
         self.regs[REG_TORQUE] = 0x1FF  # Default torque
         self.regs[REG_OFF]    = 0x030  # 24µs = 41.7kHz (Pololu default)
         self.regs[REG_BLANK]  = 0x180  # ABT enabled (vs Pololu 0x080)
@@ -163,7 +163,7 @@ class HighPowerStepperDriver:
         self.regs[REG_STALL]  = 0x040  # Default stall
         self.regs[REG_DRIVE]  = 0xA59  # 150/300mA (Pololu default)
 
-        self.step_mode_val = 2  # Track 1/4 step default
+        self.step_mode_val = 5  # Track 1/32 step default
         self.apply_settings()  # Write to hardware
 
     def set_current_milliamps(self, current_ma):
