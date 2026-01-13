@@ -606,7 +606,7 @@ def analyze_results(db: ResultsDatabase):
 def show_main_menu():
     """Display main menu and return user choice"""
     print_header("COMPREHENSIVE MOTOR TEST MENU")
-    print("\n[A] Run ALL Tests (88 configs - ~7 hours estimated)")
+    print("\n[A] Run ALL Tests (96 configs - ~8 hours estimated)")
     print("[D] Diagnostic Baseline Only (5 configs - RECOMMENDED START)")
     print("[T] Torque Focus Tests (20 configs - diagnose stalling)")
     print("[Q] Quick Recommended (10 configs)")
@@ -621,6 +621,7 @@ def show_main_menu():
     print("    CH - Category H: Blanking Time vs Microstepping (8 configs)")
     print("    CI - Category I: Resonance Troubleshooting (10 configs)")
     print("    CJ - Category J: High Torque Optimizations (8 configs)")
+    print("    CK - Category K: Ultra Current Quiet Optimization (8 configs - 7500mA)")
     print("\n[S] Specific Configuration (enter config ID like 'A1', 'B5', etc.)")
     print("[R] View Results Summary")
     print("[E] Export Results to CSV")
@@ -704,8 +705,8 @@ def main():
                     quick_configs = ['A1', 'A2', 'A3', 'A5', 'C4', 'C8', 'E1', 'E2', 'E6', 'J3']
                     run_config_list(quick_configs, db)
 
-            elif choice.startswith('C') and len(choice) == 3:
-                # Run specific category
+            elif choice.startswith('C') and len(choice) == 2:
+                # Run specific category (CA, CB, CC, etc.)
                 category = choice[1]
                 configs = get_category_configs(category)
                 if configs:
