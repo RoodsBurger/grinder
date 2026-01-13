@@ -20,8 +20,8 @@ import sys
 import time
 import os
 import signal
+import spidev
 import RPi.GPIO as GPIO
-from pololu_lib import HighPowerStepperDriver
 
 # DRV8711 Register addresses
 REG_CTRL = 0x00
@@ -41,61 +41,6 @@ def signal_handler(signum, frame):
     global shutdown_requested
     shutdown_requested = True
 
-def verify_registers(driver):
-    """Read and display all DRV8711 registers for verification"""
-    print("\n[*] Verifying DRV8711 Configuration:")
-    try:
-        ctrl = driver._read_reg(REG_CTRL)
-        torque = driver._read_reg(REG_TORQUE)
-        off = driver._read_reg(REG_OFF)
-        blank = driver._read_reg(REG_BLANK)
-        decay = driver._read_reg(REG_DECAY)
-        drive = driver._read_reg(REG_DRIVE)
-        stall = driver._read_reg(REG_STALL)
-
-        print(f"    CTRL   (0x00): 0x{ctrl:03X}   - Step mode, enable, gain")
-        print(f"    TORQUE (0x01): 0x{torque:03X}   - Current setting (4200mA)")
-        print(f"    OFF    (0x02): 0x{off:03X}   - PWM frequency (41.7kHz @ 0x030)")
-        print(f"    BLANK  (0x03): 0x{blank:03X}   - Blanking time (ABT @ 0x180)")
-        print(f"    DECAY  (0x04): 0x{decay:03X}   - Decay mode (Auto-Mixed @ 0x510)")
-        print(f"    DRIVE  (0x05): 0x{drive:03X}   - Gate drive current (150/300mA @ 0xA59)")
-        print(f"    STALL  (0x07): 0x{stall:03X}   - Stall detection threshold")
-
-        return True
-    except Exception as e:
-        print(f"    [!] WARNING: Cannot read registers (MISO issue): {e}")
-        print(f"    Continuing in BLIND mode - motor should still work")
-        return False
-
-def check_status(driver):
-    """Check STATUS register for faults"""
-    try:
-        status = driver._read_reg(REG_STATUS)
-        print(f"    STATUS: 0x{status:03X} (binary: {status:012b})")
-
-        # Check critical faults (bits 0-5)
-        faults = []
-        if status & (1 << 5): faults.append("UVLO (Under Voltage)")
-        if status & (1 << 4): faults.append("BPDF (Ch B Predriver Fault)")
-        if status & (1 << 3): faults.append("APDF (Ch A Predriver Fault)")
-        if status & (1 << 2): faults.append("BOCP (Ch B Over Current)")
-        if status & (1 << 1): faults.append("AOCP (Ch A Over Current)")
-        if status & (1 << 0): faults.append("OTS (Over Temperature)")
-
-        # Note: Bits 6-7 are stall warnings (STD, STDLAT) - not critical for startup
-        if status & (1 << 6):
-            print(f"    [i] STD (Stall Detected) - motor stationary, normal at startup")
-        if status & (1 << 7):
-            print(f"    [i] STDLAT (Latched Stall) - motor was stationary, normal at startup")
-
-        if faults:
-            print(f"    [!] CRITICAL FAULTS: {', '.join(faults)}")
-            return False
-
-        print(f"    [OK] No critical faults")
-        return True
-    except:
-        return True  # Assume OK if can't read
 
 # Hardware Pins
 SCS_PIN = 8
@@ -103,12 +48,75 @@ DIR_PIN = 24
 STEP_PIN = 25
 SLEEP_PIN = 7
 
+# SPI Configuration
+SPI_BUS = 0
+SPI_DEVICE = 0
+SPI_SPEED = 500000  # 500kHz (matches Pololu Arduino library)
+spi = None
+
 # Motor Direction
 MOTOR_DIRECTION = 1
 
+# J6 Configuration (from comprehensive test)
+J6_CONFIG = {
+    'ctrl': 0xC28,      # Gain 5, 1/32 step, disabled
+    'torque': 0x18B,    # 5000mA (calculated for Gain 5)
+    'off': 0x020,       # 62.5kHz PWM
+    'blank': 0x180,     # ABT enabled
+    'decay': 0x110,     # Slow/Mixed decay
+    'drive': 0xF59,     # 200/400mA MAX drive
+    'stall': 0x040,     # Stall detection
+    'microstep': 32     # 1/32 microstepping
+}
+
+# ============================================================================
+# SPI LOW-LEVEL FUNCTIONS (from comprehensive test)
+# ============================================================================
+
+def init_spi():
+    """Initialize SPI bus"""
+    global spi
+    spi = spidev.SpiDev()
+    spi.open(SPI_BUS, SPI_DEVICE)
+    spi.max_speed_hz = SPI_SPEED
+    spi.mode = 0b00  # CPOL=0, CPHA=0
+    print(f"    [OK] SPI opened at {spi.max_speed_hz}Hz")
+
+def close_spi():
+    """Close SPI bus"""
+    global spi
+    if spi:
+        spi.close()
+        spi = None
+
+def write_reg(reg: int, value: int):
+    """Write to DRV8711 register (12-bit value)"""
+    if value < 0 or value > 0xFFF:
+        raise ValueError(f"Register value 0x{value:X} out of range [0x000-0xFFF]")
+
+    msb = (reg << 4) | ((value >> 8) & 0x0F)
+    lsb = value & 0xFF
+
+    GPIO.output(SCS_PIN, GPIO.HIGH)  # CS Active (HIGH for Pololu)
+    spi.xfer2([msb, lsb])
+    GPIO.output(SCS_PIN, GPIO.LOW)  # CS Inactive (LOW)
+    time.sleep(0.0001)  # 100us settling time
+
+def read_reg(reg: int) -> int:
+    """Read from DRV8711 register (12-bit value)"""
+    read_cmd = 0x80 | (reg << 4)
+
+    GPIO.output(SCS_PIN, GPIO.HIGH)  # CS Active (HIGH for Pololu)
+    result = spi.xfer2([read_cmd, 0x00])
+    GPIO.output(SCS_PIN, GPIO.LOW)  # CS Inactive (LOW)
+    time.sleep(0.0001)
+
+    value = ((result[0] & 0x0F) << 8) | result[1]
+    return value
+
 def run_motor(target_rpm):
     """Run motor at target RPM until process is killed"""
-    global shutdown_requested
+    global shutdown_requested, spi
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)
@@ -118,97 +126,94 @@ def run_motor(target_rpm):
     print(f"  Motor Control Starting - Target: {target_rpm} RPM")
     print(f"{'='*60}")
 
-    # CRITICAL: Ensure SPI bus is properly closed first (LCD may have left it open)
-    print("\n[*] Ensuring SPI bus is closed...")
-    try:
-        import spidev
-        spi_test = spidev.SpiDev()
-        try:
-            spi_test.open(0, 0)
-            spi_test.close()
-            print("    [OK] SPI bus was open, now closed")
-        except:
-            print("    [OK] SPI bus was already closed")
-    except Exception as e:
-        print(f"    [!] Could not check SPI state: {e}")
+    # Initialize GPIO
+    print("\n[*] Initializing GPIO...")
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    GPIO.setup(SCS_PIN, GPIO.OUT)
+    GPIO.setup(STEP_PIN, GPIO.OUT)
+    GPIO.setup(DIR_PIN, GPIO.OUT)
+    GPIO.setup(SLEEP_PIN, GPIO.OUT)
 
-    # Initialize motor driver (will open SPI at correct 500kHz)
-    print("[*] Initializing motor driver at 500kHz SPI...")
-    driver = HighPowerStepperDriver(
-        spi_bus=0, spi_device=0,
-        cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
-    )
+    GPIO.output(SCS_PIN, GPIO.LOW)  # CS inactive (LOW for Pololu active-HIGH)
+    GPIO.output(STEP_PIN, GPIO.LOW)
+    GPIO.output(DIR_PIN, GPIO.LOW)
+    GPIO.output(SLEEP_PIN, GPIO.LOW)  # Start with chip asleep
 
-    # Verify SPI is at correct speed
-    print(f"    [OK] SPI opened at {driver.spi.max_speed_hz}Hz")
+    # Initialize SPI
+    print("[*] Initializing SPI at 500kHz...")
+    init_spi()
 
-    # Configure driver with J6 TESTED settings (5000mA worked in comprehensive test!)
-    # CRITICAL: Following comprehensive test pattern - configure THEN clear faults
-    print("[*] Configuring DRV8711 driver with J6 settings...")
-    driver.reset_settings()
-    driver.set_current_milliamps(5000)  # 119% rated - tested in comprehensive suite
-    driver.set_step_mode(32)  # 1/32 microstepping
+    # Wake up driver (matches comprehensive test)
+    print("[*] Waking up driver...")
+    GPIO.output(SLEEP_PIN, GPIO.HIGH)
+    time.sleep(0.001)
 
-    # Apply J6 register overrides
-    print("[*] Writing J6 register overrides...")
-    driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM
-    driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay
-    driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX drive
+    # Configure driver with J6 EXACT settings (from comprehensive test)
+    # CRITICAL: Write ALL registers in order (matches comprehensive test pattern)
+    print("[*] Writing J6 configuration registers...")
+    write_reg(REG_TORQUE, J6_CONFIG['torque'])
+    write_reg(REG_OFF, J6_CONFIG['off'])
+    write_reg(REG_BLANK, J6_CONFIG['blank'])
+    write_reg(REG_DECAY, J6_CONFIG['decay'])
+    write_reg(REG_DRIVE, J6_CONFIG['drive'])
+    write_reg(REG_STALL, J6_CONFIG['stall'])
+    write_reg(REG_CTRL, J6_CONFIG['ctrl'])
 
-    # CRITICAL: Clear faults IMMEDIATELY after configuration (matches comprehensive test)
-    print("[*] Clearing faults immediately after configuration...")
-    driver._write_reg(REG_STATUS, 0x000)
+    # CRITICAL: Clear faults IMMEDIATELY after configuration (comprehensive test pattern)
+    print("[*] Clearing faults...")
+    write_reg(REG_STATUS, 0x000)
     time.sleep(0.01)
 
-    # Verify configuration by reading registers (after fault clear)
-    can_read_spi = verify_registers(driver)
+    # Verify configuration by reading registers
+    print("[*] Verifying J6 register writes...")
+    try:
+        ctrl_readback = read_reg(REG_CTRL)
+        torque_readback = read_reg(REG_TORQUE)
+        off_readback = read_reg(REG_OFF)
+        decay_readback = read_reg(REG_DECAY)
+        drive_readback = read_reg(REG_DRIVE)
 
-    # CRITICAL: Verify J6 writes worked
-    if can_read_spi:
-        print("[*] Verifying J6 register writes...")
-        off_val = driver._read_reg(REG_OFF)
-        decay_val = driver._read_reg(REG_DECAY)
-        drive_val = driver._read_reg(REG_DRIVE)
+        print(f"    CTRL:   expected 0x{J6_CONFIG['ctrl']:03X}, got 0x{ctrl_readback:03X}")
+        print(f"    TORQUE: expected 0x{J6_CONFIG['torque']:03X}, got 0x{torque_readback:03X}")
+        print(f"    OFF:    expected 0x{J6_CONFIG['off']:03X}, got 0x{off_readback:03X}")
+        print(f"    DECAY:  expected 0x{J6_CONFIG['decay']:03X}, got 0x{decay_readback:03X}")
+        print(f"    DRIVE:  expected 0x{J6_CONFIG['drive']:03X}, got 0x{drive_readback:03X}")
 
-        if off_val == 0x020 and decay_val == 0x110 and drive_val == 0xF59:
+        if (ctrl_readback == J6_CONFIG['ctrl'] and
+            off_readback == J6_CONFIG['off'] and
+            decay_readback == J6_CONFIG['decay'] and
+            drive_readback == J6_CONFIG['drive']):
             print("    [OK] All J6 registers verified")
         else:
-            print(f"    [!] WARNING: Register write mismatch!")
-            print(f"        OFF: expected 0x020, got 0x{off_val:03X}")
-            print(f"        DECAY: expected 0x110, got 0x{decay_val:03X}")
-            print(f"        DRIVE: expected 0xF59, got 0x{drive_val:03X}")
+            print("    [!] WARNING: Register mismatch detected")
+    except Exception as e:
+        print(f"    [!] WARNING: Cannot verify registers: {e}")
 
-    # Check status after clearing faults (comprehensive test pattern)
-    if can_read_spi:
-        print("[*] Checking STATUS after configuration...")
-        if not check_status(driver):
-            print("[!] WARNING: Hardware faults detected")
-            print("[!] This may indicate:")
-            print("    - Power supply voltage issues")
-            print("    - Motor winding issues")
-            print("    - Current setting too high for this hardware state")
-            print("[!] Attempting to continue anyway (might work during operation)...")
+    # Check status
+    try:
+        status = read_reg(REG_STATUS)
+        print(f"[*] STATUS: 0x{status:03X}")
+        if status & 0x3F:  # Critical faults in bits 0-5
+            print("[!] WARNING: Faults detected, attempting to continue...")
+    except:
+        print("[!] WARNING: Cannot read STATUS")
 
-    # Set direction and enable
+    # Set direction and enable driver (set ENBL bit in CTRL)
     print(f"\n[*] Enabling driver and starting motor at {target_rpm} RPM...")
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
-    driver.enable_driver()
-
-    # Verify enabled successfully
-    if can_read_spi:
-        time.sleep(0.1)
-        if not check_status(driver):
-            print("[!] WARNING: Faults detected after enabling")
-            # Continue anyway - might clear during operation
+    ctrl_enabled = J6_CONFIG['ctrl'] | 0x01  # Set ENBL bit
+    write_reg(REG_CTRL, ctrl_enabled)
+    time.sleep(0.001)
 
     # Close SPI - only GPIO needed for stepping
-    driver.spi.close()
+    close_spi()
     print("[*] SPI closed, entering high-speed stepping loop...")
     print("[*] Press Ctrl+C to stop\n")
 
-    # Calculate delays
+    # Calculate delays (using J6 microstepping)
     steps_rev = 200
-    microsteps = 1 << driver.step_mode_val
+    microsteps = J6_CONFIG['microstep']
     steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
@@ -236,8 +241,7 @@ def run_motor(target_rpm):
     finally:
         # Disable driver completely
         print("[*] Disabling driver...")
-        if driver.sleep_pin:
-            GPIO.output(driver.sleep_pin, GPIO.LOW)
+        GPIO.output(SLEEP_PIN, GPIO.LOW)
         print("[*] Motor stopped")
 
 if __name__ == "__main__":
