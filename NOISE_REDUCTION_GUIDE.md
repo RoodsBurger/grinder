@@ -17,7 +17,7 @@
 
 Current default in pololu_lib.py: `0xA59`
 - Decodes to: IDRIVEP=150mA, IDRIVEN=300mA (TOO HIGH!)
-- Should try: `0xA31` = IDRIVEP=50mA, IDRIVEN=100mA
+- **FIXED to: `0x059` = IDRIVEP=50mA, IDRIVEN=100mA** ✅
 
 ### 2. **Adaptive Blanking Time (ABT) - Disabled**
 ABT improves current regulation at higher microstepping (1/16, 1/32)
@@ -65,8 +65,8 @@ From research:
 
 ### Configuration Priority Order:
 
-1. **Fix DRIVE register** (most likely culprit)
-   - Test: `DRIVE=0xA31` (100/50mA instead of 300/150mA)
+1. **Fix DRIVE register** (most likely culprit) - **NOW FIXED!** ✅
+   - Fixed: `DRIVE=0x059` (50/100mA instead of 150/300mA)
 
 2. **Enable ABT for smoother microstepping**
    - Test: `BLANK=0x180` instead of `0x080`
