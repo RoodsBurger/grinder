@@ -223,8 +223,16 @@ def draw_ui(disp, rpm, is_running):
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
-def start_motor_process(rpm):
-    """Start motor process and return process object"""
+def start_motor_process(rpm, disp):
+    """Start motor process (close LCD SPI first to avoid conflict)"""
+    # CRITICAL: Close LCD's SPI before motor process opens it
+    # Both use SPI bus 0, device 0 and can't be open simultaneously
+    try:
+        disp.spi.close()
+        print("[*] Closed LCD SPI before motor start")
+    except Exception as e:
+        print(f"WARNING: Failed to close LCD SPI: {e}")
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     motor_script = os.path.join(script_dir, "motor_only.py")
 
@@ -237,7 +245,7 @@ def start_motor_process(rpm):
     return proc
 
 def stop_motor_process(proc, disp):
-    """Stop motor process and ensure motor driver is disabled"""
+    """Stop motor process and reopen LCD SPI"""
     if proc and proc.poll() is None:
         proc.terminate()
         try:
@@ -252,8 +260,14 @@ def stop_motor_process(proc, disp):
     except Exception as e:
         print(f"ERROR: Failed to disable motor: {e}")
 
-    # Mark SPI as corrupted - motor subprocess changed it to 5MHz
-    disp.spi_corrupted = True
+    # Reopen LCD SPI (motor closed it when done)
+    try:
+        disp.spi.open(disp.spi_bus, disp.spi_device)
+        disp.spi.max_speed_hz = 80000000  # 80MHz for LCD
+        disp.spi.mode = 0b00
+        print("[*] Reopened LCD SPI after motor stop")
+    except Exception as e:
+        print(f"ERROR: Failed to reopen LCD SPI: {e}")
 
 # --- MAIN LOOP ---
 
@@ -267,14 +281,21 @@ def main():
     # Pre-load resources (icons, font)
     preload_resources()
 
-    # Initialize display and touch
+    # Initialize display
     disp = LCD_1inch28()
     disp.init_display()
 
-    time.sleep(2)
+    # Wait for display to stabilize before initializing touch
+    time.sleep(0.5)
 
+    # Initialize touch
     touch = TouchScreen()
-    touch.init()
+    if not touch.init():
+        print("WARNING: Touch controller initialization failed, retrying...")
+        time.sleep(1)
+        if not touch.init():
+            print("ERROR: Touch controller still not responding!")
+            # Continue anyway - UI will show but touch won't work
 
     rpm = 200
     motor_proc = None
@@ -302,7 +323,7 @@ def main():
                         elif action == "BUTTON":
                             if motor_proc is None:
                                 # START
-                                motor_proc = start_motor_process(rpm)
+                                motor_proc = start_motor_process(rpm, disp)
                                 draw_ui(disp, rpm, is_running=True)
                             else:
                                 # STOP
@@ -312,9 +333,18 @@ def main():
                             # Brief debounce
                             time.sleep(0.15)
 
-                # Check if motor crashed
+                # Check if motor process ended
                 if motor_proc and motor_proc.poll() is not None:
-                    print(f"ERROR: Motor process crashed with code {motor_proc.returncode}")
+                    exit_code = motor_proc.returncode
+                    if exit_code != 0:
+                        print(f"ERROR: Motor process crashed with code {exit_code}")
+                        # Print stderr for debugging
+                        stderr_output = motor_proc.stderr.read()
+                        if stderr_output:
+                            print(f"Motor stderr: {stderr_output}")
+
+                    # Reopen LCD SPI and disable motor
+                    stop_motor_process(None, disp)  # None = already exited
                     motor_proc = None
                     draw_ui(disp, rpm, is_running=False)
 

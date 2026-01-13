@@ -175,16 +175,8 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
-        # Force SPI reopen if motor subprocess corrupted it
-        if self.spi_corrupted:
-            try:
-                self.spi.close()
-                self.spi.open(self.spi_bus, self.spi_device)
-                self.spi.max_speed_hz = 80000000
-                self.spi.mode = 0b00
-                self.spi_corrupted = False
-            except Exception as e:
-                print(f"ERROR: SPI reset failed: {e}")
+        # Note: motor_control.py now properly closes/reopens SPI
+        # No need for corruption detection
 
         if image.mode != 'RGB':
             image = image.convert('RGB')
