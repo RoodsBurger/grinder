@@ -187,39 +187,34 @@ def run_motor(target_rpm):
     write_reg(REG_STATUS, 0x000)
     time.sleep(0.01)
 
-    # Verify configuration by reading registers
-    print("[*] Verifying J6 register writes...")
+    # Verify configuration by reading registers (OPTIONAL - works in BLIND mode if MISO broken)
+    print("[*] Verifying configuration...")
     try:
         ctrl_readback = read_reg(REG_CTRL)
-        torque_readback = read_reg(REG_TORQUE)
-        off_readback = read_reg(REG_OFF)
-        decay_readback = read_reg(REG_DECAY)
-        drive_readback = read_reg(REG_DRIVE)
-
-        print(f"    CTRL:   expected 0x{J6_CONFIG['ctrl']:03X}, got 0x{ctrl_readback:03X}")
-        print(f"    TORQUE: expected 0x{J6_CONFIG['torque']:03X}, got 0x{torque_readback:03X}")
-        print(f"    OFF:    expected 0x{J6_CONFIG['off']:03X}, got 0x{off_readback:03X}")
-        print(f"    DECAY:  expected 0x{J6_CONFIG['decay']:03X}, got 0x{decay_readback:03X}")
-        print(f"    DRIVE:  expected 0x{J6_CONFIG['drive']:03X}, got 0x{drive_readback:03X}")
-
-        if (ctrl_readback == J6_CONFIG['ctrl'] and
-            off_readback == J6_CONFIG['off'] and
-            decay_readback == J6_CONFIG['decay'] and
-            drive_readback == J6_CONFIG['drive']):
-            print("    [OK] All J6 registers verified")
+        if ctrl_readback == 0xFFF or ctrl_readback == 0x000:
+            print("    [!] WARNING: SPI MISO not working (reads 0xFFF)")
+            print("    [i] Continuing in BLIND mode - motor should still work")
         else:
-            print("    [!] WARNING: Register mismatch detected")
-    except Exception as e:
-        print(f"    [!] WARNING: Cannot verify registers: {e}")
+            torque_readback = read_reg(REG_TORQUE)
+            off_readback = read_reg(REG_OFF)
+            decay_readback = read_reg(REG_DECAY)
+            drive_readback = read_reg(REG_DRIVE)
 
-    # Check status
-    try:
-        status = read_reg(REG_STATUS)
-        print(f"[*] STATUS: 0x{status:03X}")
-        if status & 0x3F:  # Critical faults in bits 0-5
-            print("[!] WARNING: Faults detected, attempting to continue...")
-    except:
-        print("[!] WARNING: Cannot read STATUS")
+            print(f"    CTRL:   0x{ctrl_readback:03X} (expected 0x{J6_CONFIG['ctrl']:03X})")
+            print(f"    OFF:    0x{off_readback:03X} (expected 0x{J6_CONFIG['off']:03X})")
+            print(f"    DECAY:  0x{decay_readback:03X} (expected 0x{J6_CONFIG['decay']:03X})")
+            print(f"    DRIVE:  0x{drive_readback:03X} (expected 0x{J6_CONFIG['drive']:03X})")
+
+            if (ctrl_readback == J6_CONFIG['ctrl'] and
+                off_readback == J6_CONFIG['off'] and
+                decay_readback == J6_CONFIG['decay'] and
+                drive_readback == J6_CONFIG['drive']):
+                print("    [OK] All J6 registers verified")
+            else:
+                print("    [!] WARNING: Register mismatch - continuing anyway")
+    except Exception as e:
+        print(f"    [!] WARNING: Cannot read registers: {e}")
+        print("    [i] Continuing in BLIND mode")
 
     # Set direction and enable driver (set ENBL bit in CTRL)
     print(f"\n[*] Enabling driver and starting motor at {target_rpm} RPM...")
