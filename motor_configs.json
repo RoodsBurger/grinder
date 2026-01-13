@@ -1703,5 +1703,171 @@
       100,
       200
     ]
+  },
+  "K1": {
+    "id": "K1",
+    "name": "Ultra Current 7500mA @ 100kHz PWM",
+    "description": "Maximum current with ultra-high PWM for quietest operation",
+    "current_ma": 7500,
+    "ctrl_base": 3112,
+    "off": 24,
+    "blank": 384,
+    "decay": 272,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 32,
+    "pwm_freq_khz": 100.0,
+    "decay_name": "Slow/Mixed (0x110)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      50,
+      100,
+      200
+    ]
+  },
+  "K2": {
+    "id": "K2",
+    "name": "Ultra Current 7500mA @ 83kHz PWM",
+    "description": "Maximum current with very high PWM",
+    "current_ma": 7500,
+    "ctrl_base": 3112,
+    "off": 30,
+    "blank": 384,
+    "decay": 272,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 32,
+    "pwm_freq_khz": 83.0,
+    "decay_name": "Slow/Mixed (0x110)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      50,
+      100,
+      200
+    ]
+  },
+  "K3": {
+    "id": "K3",
+    "name": "Ultra Current 7500mA @ 62.5kHz PWM",
+    "description": "Maximum current with high PWM (same as J6 but higher current)",
+    "current_ma": 7500,
+    "ctrl_base": 3112,
+    "off": 32,
+    "blank": 384,
+    "decay": 272,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 32,
+    "pwm_freq_khz": 62.5,
+    "decay_name": "Slow/Mixed (0x110)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      50,
+      100,
+      200
+    ]
+  },
+  "K4": {
+    "id": "K4",
+    "name": "Ultra Current 7500mA @ 100kHz + 1/64 step",
+    "description": "Maximum current with ultra-high PWM and finer microstepping",
+    "current_ma": 7500,
+    "ctrl_base": 3120,
+    "off": 24,
+    "blank": 384,
+    "decay": 272,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 64,
+    "pwm_freq_khz": 100.0,
+    "decay_name": "Slow/Mixed (0x110)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      100,
+      200
+    ]
+  },
+  "K5": {
+    "id": "K5",
+    "name": "Ultra Current 7500mA @ 100kHz + Auto-Mixed",
+    "description": "Maximum current with ultra-high PWM and auto-mixed decay",
+    "current_ma": 7500,
+    "ctrl_base": 3112,
+    "off": 24,
+    "blank": 384,
+    "decay": 1296,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 32,
+    "pwm_freq_khz": 100.0,
+    "decay_name": "Auto-Mixed (0x510)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      50,
+      100,
+      200
+    ]
+  },
+  "K6": {
+    "id": "K6",
+    "name": "Ultra Current 7500mA @ 62.5kHz + Auto-Mixed",
+    "description": "Maximum current with high PWM and auto-mixed decay",
+    "current_ma": 7500,
+    "ctrl_base": 3112,
+    "off": 32,
+    "blank": 384,
+    "decay": 1296,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 32,
+    "pwm_freq_khz": 62.5,
+    "decay_name": "Auto-Mixed (0x510)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      50,
+      100,
+      200
+    ]
+  },
+  "K7": {
+    "id": "K7",
+    "name": "Ultra Current 7500mA @ 100kHz + Slow decay",
+    "description": "Maximum current with ultra-high PWM and slow decay for torque",
+    "current_ma": 7500,
+    "ctrl_base": 3112,
+    "off": 24,
+    "blank": 384,
+    "decay": 16,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 32,
+    "pwm_freq_khz": 100.0,
+    "decay_name": "Slow (0x010)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      50,
+      100,
+      200
+    ]
+  },
+  "K8": {
+    "id": "K8",
+    "name": "Ultra Current 7500mA @ 100kHz + 1/128 step",
+    "description": "Maximum current with ultra-high PWM and ultra-fine microstepping",
+    "current_ma": 7500,
+    "ctrl_base": 3128,
+    "off": 24,
+    "blank": 384,
+    "decay": 1296,
+    "drive": 3929,
+    "stall": 64,
+    "microstep_divider": 128,
+    "pwm_freq_khz": 100.0,
+    "decay_name": "Auto-Mixed (0x510)",
+    "drive_name": "200/400mA (MAX)",
+    "test_speeds": [
+      100,
+      200
+    ]
   }
 }
