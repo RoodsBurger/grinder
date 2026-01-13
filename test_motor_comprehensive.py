@@ -92,18 +92,11 @@ class TestResult:
     drive_current: str
     microstep_mode: str
 
-    # User ratings (1-10 scale)
+    # User rating
     noise_rating: int          # 1=very loud, 10=silent
-    torque_rating: int         # 1=very weak, 10=strong
 
-    # Observations
-    skipped_steps: bool        # Did it skip steps?
-    stalled: bool              # Did it stall completely?
-    resonance_detected: bool   # Unusual vibration?
+    # Auto-detected
     thermal_warning: bool      # OTS bit set?
-
-    # Additional notes
-    notes: str = ""
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for CSV export"""
@@ -118,12 +111,7 @@ class TestResult:
             'drive_current': self.drive_current,
             'microstep_mode': self.microstep_mode,
             'noise_rating': self.noise_rating,
-            'torque_rating': self.torque_rating,
-            'skipped_steps': skipped_steps,
-            'stalled': self.stalled,
-            'resonance_detected': self.resonance_detected,
-            'thermal_warning': self.thermal_warning,
-            'notes': self.notes
+            'thermal_warning': self.thermal_warning
         }
 
 @dataclass
@@ -160,25 +148,6 @@ class ResultsDatabase:
     def get_top_by_noise(self, n: int = 10) -> List[TestResult]:
         """Get top N quietest configurations"""
         return sorted(self.results, key=lambda r: r.noise_rating, reverse=True)[:n]
-
-    def get_top_by_torque(self, n: int = 10) -> List[TestResult]:
-        """Get top N strongest torque configurations"""
-        return sorted(self.results, key=lambda r: r.torque_rating, reverse=True)[:n]
-
-    def get_top_combined(self, n: int = 10, noise_weight: float = 0.6, torque_weight: float = 0.4) -> List[TestResult]:
-        """Get top N configurations by weighted score (default: 60% noise, 40% torque)"""
-        def combined_score(result):
-            return (result.noise_rating * noise_weight) + (result.torque_rating * torque_weight)
-
-        return sorted(self.results, key=combined_score, reverse=True)[:n]
-
-    def get_stalled_configs(self) -> List[TestResult]:
-        """Get all configurations that stalled"""
-        return [r for r in self.results if r.stalled]
-
-    def get_configs_with_resonance(self) -> List[TestResult]:
-        """Get all configurations with unusual vibration/resonance"""
-        return [r for r in self.results if r.resonance_detected]
 
     def get_configs_with_thermal(self) -> List[TestResult]:
         """Get all configurations that triggered thermal warnings"""
@@ -453,11 +422,11 @@ def print_config_info(config: Dict):
 
 def collect_ratings(config: Dict, rpm: int) -> Optional[TestResult]:
     """
-    Interactive prompt to collect user ratings after test
+    Interactive prompt to collect noise rating after test
     Returns TestResult or None if skipped
     """
     print("\n" + "-" * 70)
-    print("RATE THIS CONFIGURATION:")
+    print("RATE NOISE:")
     print("-" * 70)
 
     try:
@@ -465,16 +434,6 @@ def collect_ratings(config: Dict, rpm: int) -> Optional[TestResult]:
         if not 1 <= noise <= 10:
             print("[!] Invalid rating, skipping...")
             return None
-
-        torque = int(input("Torque rating (1=very weak, 10=strong): "))
-        if not 1 <= torque <= 10:
-            print("[!] Invalid rating, skipping...")
-            return None
-
-        skipped = input("Did it skip steps? (y/n): ").lower().strip() == 'y'
-        stalled = input("Did it stall completely? (y/n): ").lower().strip() == 'y'
-        resonance = input("Unusual vibration/resonance? (y/n): ").lower().strip() == 'y'
-        notes = input("Additional notes (optional): ").strip()
 
         thermal = check_thermal_fault()
 
@@ -489,12 +448,7 @@ def collect_ratings(config: Dict, rpm: int) -> Optional[TestResult]:
             drive_current=config.get('drive_name', 'Unknown'),
             microstep_mode=f"1/{config.get('microstep_divider', 32)}",
             noise_rating=noise,
-            torque_rating=torque,
-            skipped_steps=skipped,
-            stalled=stalled,
-            resonance_detected=resonance,
-            thermal_warning=thermal,
-            notes=notes
+            thermal_warning=thermal
         )
 
         return result
@@ -2270,7 +2224,7 @@ def run_config_list(config_ids: List[str], db: ResultsDatabase):
 # ============================================================================
 
 def analyze_results(db: ResultsDatabase):
-    """Display comprehensive results analysis"""
+    """Display results analysis"""
     if not db.results:
         print("[!] No results to analyze")
         return
@@ -2282,50 +2236,8 @@ def analyze_results(db: ResultsDatabase):
     print("-" * 70)
     top_quiet = db.get_top_by_noise(10)
     for i, result in enumerate(top_quiet, 1):
-        print(f"{i:2d}. {result.config_id:4s} - {result.config_name:30s} | "
-              f"Noise: {result.noise_rating:2d}/10 | Torque: {result.torque_rating:2d}/10 | "
-              f"{result.rpm} RPM")
-
-    # TOP 10 STRONGEST TORQUE
-    print("\n\nTOP 10 STRONGEST TORQUE CONFIGURATIONS:")
-    print("-" * 70)
-    top_torque = db.get_top_by_torque(10)
-    for i, result in enumerate(top_torque, 1):
-        print(f"{i:2d}. {result.config_id:4s} - {result.config_name:30s} | "
-              f"Torque: {result.torque_rating:2d}/10 | Noise: {result.noise_rating:2d}/10 | "
-              f"{result.rpm} RPM")
-
-    # TOP 10 BEST COMBINED (60% noise, 40% torque)
-    print("\n\nTOP 10 BEST COMBINED (60% Quiet, 40% Torque):")
-    print("-" * 70)
-    top_combined = db.get_top_combined(10, noise_weight=0.6, torque_weight=0.4)
-    for i, result in enumerate(top_combined, 1):
-        combined_score = (result.noise_rating * 0.6) + (result.torque_rating * 0.4)
-        print(f"{i:2d}. {result.config_id:4s} - {result.config_name:30s} | "
-              f"Score: {combined_score:.1f} | "
-              f"N: {result.noise_rating}/10 T: {result.torque_rating}/10 | {result.rpm} RPM")
-
-    # CONFIGURATIONS THAT STALLED
-    stalled = db.get_stalled_configs()
-    if stalled:
-        print("\n\nCONFIGURATIONS THAT STALLED:")
-        print("-" * 70)
-        for result in stalled:
-            print(f"  {result.config_id:4s} - {result.config_name:30s} | "
-                  f"{result.rpm} RPM | Current: {result.current_ma}mA")
-    else:
-        print("\n\n[OK] No configurations stalled")
-
-    # RESONANCE ZONES DETECTED
-    resonance = db.get_configs_with_resonance()
-    if resonance:
-        print("\n\nRESONANCE ZONES DETECTED:")
-        print("-" * 70)
-        for result in resonance:
-            print(f"  {result.config_id:4s} - {result.config_name:30s} | "
-                  f"{result.rpm} RPM | PWM: {result.pwm_freq_khz}kHz")
-    else:
-        print("\n\n[OK] No unusual resonance detected")
+        print(f"{i:2d}. {result.config_id:4s} - {result.config_name:35s} | "
+              f"Noise: {result.noise_rating:2d}/10 | {result.rpm} RPM")
 
     # THERMAL WARNINGS
     thermal = db.get_configs_with_thermal()
