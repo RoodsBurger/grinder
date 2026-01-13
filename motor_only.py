@@ -3,16 +3,17 @@
 Standalone motor control - runs in separate process
 No display, no touch - just motor operation
 
-MOTOR CONFIGURATION: combo_pololu_32step (recommended quiet settings)
-- Current: 4200mA (100% motor rated)
+MOTOR CONFIGURATION: J6 - Torque + Quiet Compromise v1 (from comprehensive testing)
+- Current: 5000mA (119% motor rated - optimal torque/noise balance)
 - Microstepping: 1/32 (very smooth)
-- PWM Frequency: 41.7kHz (ABOVE audible, Pololu default)
+- PWM Frequency: 62.5kHz (above audible, quieter than 41.7kHz)
 - Adaptive Blanking: ENABLED (for smooth 1/32 stepping)
-- Decay Mode: Auto-Mixed (TI recommended)
-- Gate Drive: 150/300mA (Pololu default)
+- Decay Mode: Slow/Mixed (0x110) - better torque than Auto-Mixed, quieter than Slow
+- Gate Drive: 200/400mA MAX (0xF59) - strong switching for reliability
 - SPI: 500kHz (matches Pololu Arduino library)
 
-Based on official Pololu library + noise optimization testing.
+Test Results: Noise 6-7/10, Excellent torque, No stalling at low speeds
+Based on 88-configuration comprehensive testing (2026-01-13)
 Reference: https://github.com/pololu/high-power-stepper-driver-arduino
 """
 import sys
@@ -53,11 +54,11 @@ def verify_registers(driver):
         stall = driver._read_reg(REG_STALL)
 
         print(f"    CTRL   (0x00): 0x{ctrl:03X}   - Step mode, enable, gain")
-        print(f"    TORQUE (0x01): 0x{torque:03X}   - Current setting")
-        print(f"    OFF    (0x02): 0x{off:03X}   - PWM frequency (41.7kHz @ 0x030)")
+        print(f"    TORQUE (0x01): 0x{torque:03X}   - Current setting (5000mA)")
+        print(f"    OFF    (0x02): 0x{off:03X}   - PWM frequency (62.5kHz @ 0x020)")
         print(f"    BLANK  (0x03): 0x{blank:03X}   - Blanking time (ABT @ 0x180)")
-        print(f"    DECAY  (0x04): 0x{decay:03X}   - Decay mode (Auto-Mixed @ 0x510)")
-        print(f"    DRIVE  (0x05): 0x{drive:03X}   - Gate drive current (0xA59 = 150/300mA)")
+        print(f"    DECAY  (0x04): 0x{decay:03X}   - Decay mode (Slow/Mixed @ 0x110)")
+        print(f"    DRIVE  (0x05): 0x{drive:03X}   - Gate drive current (0xF59 = 200/400mA MAX)")
         print(f"    STALL  (0x07): 0x{stall:03X}   - Stall detection threshold")
 
         return True
@@ -115,12 +116,18 @@ def run_motor(target_rpm):
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
 
-    # Configure driver using high-level API
-    # Library defaults are already optimized (ABT enabled, 41.7kHz PWM, Auto-Mixed decay)
-    print("\n[*] Configuring DRV8711 driver...")
+    # Configure driver with J6 optimized settings
+    print("\n[*] Configuring DRV8711 driver with J6 settings...")
     driver.reset_settings()
-    driver.set_current_milliamps(4200)  # Match motor rated current (4.2A)
+    driver.set_current_milliamps(5000)  # 119% rated - optimal torque/noise balance
     driver.set_step_mode(32)  # 1/32 microstepping for smoothest, quietest operation
+
+    # Override defaults with J6 optimizations
+    driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM (quieter than 41.7kHz)
+    driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay (better torque, still quiet)
+    driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX (strong gate drive)
+    # BLANK already set to 0x180 (ABT enabled) by reset_settings()
+    time.sleep(0.01)  # Let settings settle
 
     # Verify configuration by reading registers
     can_read_spi = verify_registers(driver)
