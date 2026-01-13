@@ -14,9 +14,10 @@ from touch_screen import TouchScreen
 random.seed(42)
 
 # Hardware pins
-SLEEP_PIN = 7  # Motor driver sleep pin
+SLEEP_PIN = 7
 
 # --- CONFIGURATION ---
+MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (7500mA, 100kHz PWM, 1/64 step)
 MIN_RPM = 0
 MAX_RPM = 300
 
@@ -223,8 +224,8 @@ def draw_ui(disp, rpm, is_running):
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
-def start_motor_process(rpm, disp):
-    """Start motor process (close LCD SPI first to avoid conflict)"""
+def start_motor_process(rpm, disp, config_id='K4'):
+    """Start motor process with specified config (close LCD SPI first to avoid conflict)"""
     # CRITICAL: Close LCD's SPI before motor process opens it
     # Both use SPI bus 0, device 0 and can't be open simultaneously
     disp.close_spi_for_motor()
@@ -233,7 +234,7 @@ def start_motor_process(rpm, disp):
     motor_script = os.path.join(script_dir, "motor_only.py")
 
     proc = subprocess.Popen(
-        ["python3", motor_script, str(rpm)],
+        ["python3", motor_script, str(rpm), config_id],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
@@ -323,7 +324,7 @@ def main():
                             if motor_proc is None:
                                 # START - draw UI BEFORE closing SPI
                                 draw_ui(disp, rpm, is_running=True)
-                                motor_proc = start_motor_process(rpm, disp)
+                                motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
                             else:
                                 # STOP - reopen SPI, then draw
                                 stop_motor_process(motor_proc, disp)
