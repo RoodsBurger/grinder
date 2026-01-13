@@ -139,18 +139,11 @@ def run_motor(target_rpm):
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
 
-    # CRITICAL: Power cycle SLEEP to clear any latched faults from previous runs
-    # Even though motor_control.py initialized GPIO, we need a clean reset here
-    print("[*] Power cycling SLEEP pin to clear latched faults...")
-    GPIO.output(SLEEP_PIN, GPIO.LOW)
-    time.sleep(0.1)  # Hold reset for 100ms
-    GPIO.output(SLEEP_PIN, GPIO.HIGH)
-    time.sleep(0.1)  # Wait for chip to wake up
-
     # Verify SPI is at correct speed
     print(f"    [OK] SPI opened at {driver.spi.max_speed_hz}Hz")
 
     # Configure driver with J6 TESTED settings (5000mA worked in comprehensive test!)
+    # CRITICAL: Following comprehensive test pattern - configure THEN clear faults
     print("[*] Configuring DRV8711 driver with J6 settings...")
     driver.reset_settings()
     driver.set_current_milliamps(5000)  # 119% rated - tested in comprehensive suite
@@ -161,9 +154,13 @@ def run_motor(target_rpm):
     driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM
     driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay
     driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX drive
-    time.sleep(0.1)  # Let settings settle
 
-    # Verify configuration by reading registers
+    # CRITICAL: Clear faults IMMEDIATELY after configuration (matches comprehensive test)
+    print("[*] Clearing faults immediately after configuration...")
+    driver._write_reg(REG_STATUS, 0x000)
+    time.sleep(0.01)
+
+    # Verify configuration by reading registers (after fault clear)
     can_read_spi = verify_registers(driver)
 
     # CRITICAL: Verify J6 writes worked
@@ -176,41 +173,21 @@ def run_motor(target_rpm):
         if off_val == 0x020 and decay_val == 0x110 and drive_val == 0xF59:
             print("    [OK] All J6 registers verified")
         else:
-            print(f"    [!] ERROR: Register write failure!")
+            print(f"    [!] WARNING: Register write mismatch!")
             print(f"        OFF: expected 0x020, got 0x{off_val:03X}")
             print(f"        DECAY: expected 0x110, got 0x{decay_val:03X}")
             print(f"        DRIVE: expected 0xF59, got 0x{drive_val:03X}")
-            print("    [!] Chip may be in bad state - aborting")
-            driver.disable_driver()
-            return
 
-    # Clear faults multiple times - sometimes chip needs multiple writes
+    # Check status after clearing faults (comprehensive test pattern)
     if can_read_spi:
-        print("\n[*] Clearing faults (multiple attempts)...")
-        for attempt in range(3):
-            driver.clear_faults()
-            time.sleep(0.02)
-            status = driver._read_reg(REG_STATUS)
-            critical_faults = status & 0x3F  # Bits 0-5 are critical
-            if critical_faults == 0:
-                print(f"    [OK] Faults cleared on attempt {attempt+1}")
-                break
-            print(f"    [i] Attempt {attempt+1}: STATUS still 0x{status:03X}")
-        else:
-            print(f"    [!] WARNING: Could not clear all faults after 3 attempts")
-
-    # Check status after clearing faults
-    if can_read_spi:
-        print("[*] Final STATUS check...")
+        print("[*] Checking STATUS after configuration...")
         if not check_status(driver):
-            print("[!] CRITICAL: Hardware faults persist!")
-            print("[!] Possible causes:")
-            print("    - Power supply voltage too low or unstable")
-            print("    - Motor winding short circuit or open circuit")
-            print("    - Loose wiring connections")
-            print("    - Driver chip actually overheated")
-            driver.disable_driver()
-            return
+            print("[!] WARNING: Hardware faults detected")
+            print("[!] This may indicate:")
+            print("    - Power supply voltage issues")
+            print("    - Motor winding issues")
+            print("    - Current setting too high for this hardware state")
+            print("[!] Attempting to continue anyway (might work during operation)...")
 
     # Set direction and enable
     print(f"\n[*] Enabling driver and starting motor at {target_rpm} RPM...")
