@@ -317,32 +317,28 @@ def setup_driver(config: Dict) -> bool:
         return False
 
 def enable_driver():
-    """Enable the driver (wake from sleep and set ENBL bit in CTRL register)"""
+    """Enable the driver (set ENBL bit in CTRL register)"""
     global current_ctrl_value
-
-    # Wake up driver from sleep
-    GPIO.output(SLEEP_PIN, GPIO.HIGH)
-    time.sleep(0.001)
 
     # Use tracked CTRL value to avoid needing to read (works in blind mode)
     ctrl_enabled = current_ctrl_value | 0x01
     write_reg(REG_CTRL, ctrl_enabled)
     current_ctrl_value = ctrl_enabled  # Update tracked value
-
-    # Clear any faults that may have occurred during sleep
-    write_reg(REG_STATUS, 0x000)
     time.sleep(0.001)
 
 def disable_driver():
-    """Fully disable driver - clear ENBL bit and pull SLEEP low"""
+    """Disable driver - clear ENBL bit (removes holding torque but keeps config)"""
     global current_ctrl_value
 
     # Use tracked CTRL value to avoid needing to read (works in blind mode)
     ctrl_disabled = current_ctrl_value & ~0x01
     write_reg(REG_CTRL, ctrl_disabled)
     current_ctrl_value = ctrl_disabled  # Update tracked value
+    time.sleep(0.001)
 
-    # Pull SLEEP low for complete shutdown (no idle torque)
+def shutdown_driver():
+    """Complete shutdown - disable and pull SLEEP low (resets all registers)"""
+    disable_driver()
     GPIO.output(SLEEP_PIN, GPIO.LOW)
     time.sleep(0.1)
 
@@ -2185,7 +2181,7 @@ def run_single_config_test(config: Dict, db: ResultsDatabase):
             print("[!] Test interrupted by emergency stop")
             break
 
-        # Disable driver between tests
+        # Disable driver between speeds (removes torque but keeps config)
         disable_driver()
         time.sleep(0.5)
 
@@ -2193,6 +2189,9 @@ def run_single_config_test(config: Dict, db: ResultsDatabase):
         result = collect_ratings(config, rpm)
         if result:
             db.add_result(result)
+
+    # Fully shutdown driver after all speeds tested (resets chip)
+    shutdown_driver()
 
     print("\n" + "-" * 70)
     print(f"Config {config['id']} complete")
