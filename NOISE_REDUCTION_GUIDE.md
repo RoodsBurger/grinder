@@ -1,5 +1,18 @@
 # DRV8711 Noise Reduction Guide
 
+## Official Pololu Library Defaults
+
+From https://github.com/pololu/high-power-stepper-driver-arduino:
+
+| Register | Pololu Default | What We Changed | Reason |
+|----------|---------------|-----------------|--------|
+| OFF | 0x030 (24µs = 41.7kHz) | **NOW 0x030** ✅ | Above audible range |
+| BLANK | 0x080 | Same | Standard blanking |
+| DECAY | 0x110 (Slow/Mixed) | **0x510 (Auto-Mixed)** | Example recommends AutoMixed |
+| DRIVE | 0xA59 (150/300mA) | **0x559 (100/200mA)** | Reduce noise while maintaining torque |
+
+**KEY INSIGHT:** Pololu uses **SHORTER** OFF time for **HIGHER** PWM frequency (41.7kHz) to get **ABOVE** the audible range. We initially did the opposite (longer OFF = lower PWM = audible noise)!
+
 ## Critical Issues Found in Research
 
 ### 1. **DRIVE Register - NOT CONFIGURED!**
@@ -26,25 +39,20 @@ ABT improves current regulation at higher microstepping (1/16, 1/32)
 - Current: `0x080` (ABT disabled)
 - With ABT: `0x180` (ABT enabled)
 
-### 3. **PWM Frequency - In Audible Range!**
-Current OFF time: 80µs = **12.5 kHz PWM frequency**
-- This is RIGHT in the most annoying audible range!
+### 3. **PWM Frequency - KEY TO NOISE REDUCTION!**
+**CRITICAL: Pololu uses OFF=0x030 (24µs = 41.7 kHz) - ABOVE audible range!**
 
-**Options:**
-1. **Very low frequency** (<1 kHz) - longer OFF time (>200µs)
-   - Pros: Silent PWM chopping
-   - Cons: More current ripple
+We initially had OFF=0x0A0 (80µs = 12.5 kHz) which was **IN the audible range** - that's why it was noisy!
 
-2. **Above audible range** (>20 kHz) - shorter OFF time (<50µs)
-   - Pros: Inaudible chopping frequency
-   - Cons: Higher switching losses, more EMI
+**The fix:** Use **SHORTER** OFF time = **HIGHER** PWM frequency = above audible!
 
-**Test different TOFF values:**
-- `0x030` = 24µs = 41 kHz (above audible)
-- `0x050` = 40µs = 25 kHz (above audible)
-- `0x0A0` = 80µs = 12.5 kHz ⚠️ **AUDIBLE** (current setting)
-- `0x140` = 160µs = 6.25 kHz (lower audible)
-- `0x1FF` = 255µs = 3.9 kHz (low audible)
+**Recommended values:**
+- `0x030` = 24µs = **41.7 kHz** ✅ **Pololu default - ABOVE audible**
+- `0x028` = 20µs = 50 kHz (even higher)
+- `0x050` = 40µs = 25 kHz (still above audible)
+- `0x0A0` = 80µs = 12.5 kHz ❌ **AUDIBLE - DO NOT USE**
+
+**Now fixed to 0x030 (Pololu default)**
 
 ### 4. **Decay Mode Settings**
 Current: Auto-Mixed Decay (0x510)
