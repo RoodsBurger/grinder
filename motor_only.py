@@ -3,17 +3,17 @@
 Standalone motor control - runs in separate process
 No display, no touch - just motor operation
 
-MOTOR CONFIGURATION: Pololu Library Defaults (SAFE - verified working)
-- Current: 4200mA (100% motor rated - safe)
+MOTOR CONFIGURATION: J6 - Torque + Quiet Compromise v1
+- Current: 5000mA (119% motor rated - from comprehensive testing)
 - Microstepping: 1/32 (very smooth)
-- PWM Frequency: 41.7kHz (Pololu default)
+- PWM Frequency: 62.5kHz (0x020 - above audible)
 - Adaptive Blanking: ENABLED (for smooth 1/32 stepping)
-- Decay Mode: Auto-Mixed (0x510) - TI recommended
-- Gate Drive: 150/300mA (Pololu default)
+- Decay Mode: Slow/Mixed (0x110) - better torque, still quiet
+- Gate Drive: 200/400mA MAX (0xF59) - strong switching
 - SPI: 500kHz (matches Pololu Arduino library)
 
-NOTE: Higher currents (5000mA+) cause hardware faults (BPDF, APDF, OTS)
-      indicating power supply or driver chip limits reached.
+Test Results: Noise 6-7/10, Good torque at all speeds
+From 88-configuration comprehensive testing (2026-01-13)
 Reference: https://github.com/pololu/high-power-stepper-driver-arduino
 """
 import sys
@@ -132,16 +132,8 @@ def run_motor(target_rpm):
     except Exception as e:
         print(f"    [!] Could not check SPI state: {e}")
 
-    # Power cycle the motor driver chip to clear any latched faults
-    print("[*] Power cycling motor driver to clear latched faults...")
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(SLEEP_PIN, GPIO.OUT)
-    GPIO.output(SLEEP_PIN, GPIO.LOW)   # Power down
-    time.sleep(0.2)  # Longer power down
-    GPIO.output(SLEEP_PIN, GPIO.HIGH)  # Power up
-    time.sleep(0.2)  # Longer boot time
-
     # Initialize motor driver (will open SPI at correct 500kHz)
+    # NOTE: Don't power cycle SLEEP here - motor_control.py owns that pin
     print("[*] Initializing motor driver at 500kHz SPI...")
     driver = HighPowerStepperDriver(
         spi_bus=0, spi_device=0,
@@ -151,19 +143,39 @@ def run_motor(target_rpm):
     # Verify SPI is at correct speed
     print(f"    [OK] SPI opened at {driver.spi.max_speed_hz}Hz")
 
-    # Configure driver with SAFE settings (same as diagnostic.py which works)
-    print("[*] Configuring DRV8711 driver with safe settings...")
+    # Configure driver with J6 TESTED settings (5000mA worked in comprehensive test!)
+    print("[*] Configuring DRV8711 driver with J6 settings...")
     driver.reset_settings()
-    driver.set_current_milliamps(4200)  # 100% motor rated - safe starting point
-    driver.set_step_mode(32)  # 1/32 microstepping for smoothest operation
+    driver.set_current_milliamps(5000)  # 119% rated - tested in comprehensive suite
+    driver.set_step_mode(32)  # 1/32 microstepping
 
-    # NO register overrides - use pololu_lib defaults which work in diagnostic
-    # (If this works, we can add J6 optimizations gradually)
-    time.sleep(0.05)  # Let settings settle
+    # Apply J6 register overrides
+    print("[*] Writing J6 register overrides...")
+    driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM
+    driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay
+    driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX drive
+    time.sleep(0.1)  # Let settings settle
 
     # Verify configuration by reading registers
     can_read_spi = verify_registers(driver)
-    # Using pololu_lib defaults - no need to verify overrides
+
+    # CRITICAL: Verify J6 writes worked
+    if can_read_spi:
+        print("[*] Verifying J6 register writes...")
+        off_val = driver._read_reg(REG_OFF)
+        decay_val = driver._read_reg(REG_DECAY)
+        drive_val = driver._read_reg(REG_DRIVE)
+
+        if off_val == 0x020 and decay_val == 0x110 and drive_val == 0xF59:
+            print("    [OK] All J6 registers verified")
+        else:
+            print(f"    [!] ERROR: Register write failure!")
+            print(f"        OFF: expected 0x020, got 0x{off_val:03X}")
+            print(f"        DECAY: expected 0x110, got 0x{decay_val:03X}")
+            print(f"        DRIVE: expected 0xF59, got 0x{drive_val:03X}")
+            print("    [!] Chip may be in bad state - aborting")
+            driver.disable_driver()
+            return
 
     # Clear faults multiple times - sometimes chip needs multiple writes
     if can_read_spi:

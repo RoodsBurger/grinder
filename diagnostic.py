@@ -152,13 +152,49 @@ def test_motor_movement(driver, blind_mode=False):
     print_header("TEST 3: MOTOR MOVEMENT")
     print("(!) WARNING: Motor may move.")
 
-    # Clear faults
-    driver._write_reg(REG_STATUS, 0)
+    # Configure driver with J6 TESTED settings (5000mA worked in comprehensive test!)
+    print("[*] Configuring DRV8711 driver with J6 settings...")
+    driver.reset_settings()
+    driver.set_current_milliamps(5000)  # 119% rated - tested in comprehensive suite
+    driver.set_step_mode(32)  # 1/32 microstepping
 
-    # 1.0 Amps is safer for bench testing than 4.2 Amps
-    print("[*] Setting Test Current to 1000mA...")
-    driver.set_current_milliamps(1000)
-    driver.set_step_mode(16)  # 1/16 step
+    # Apply J6 register overrides
+    print("[*] Writing J6 register overrides...")
+    driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM
+    driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay
+    driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX drive
+    time.sleep(0.1)  # Let settings settle
+
+    # Verify configuration by reading registers (if not blind mode)
+    if not blind_mode:
+        print("[*] Verifying J6 register writes...")
+        off_val = driver._read_reg(REG_OFF)
+        decay_val = driver._read_reg(REG_DECAY)
+        drive_val = driver._read_reg(REG_DRIVE)
+        torque_val = driver._read_reg(REG_TORQUE)
+
+        print(f"    OFF:    expected 0x020, got 0x{off_val:03X}")
+        print(f"    DECAY:  expected 0x110, got 0x{decay_val:03X}")
+        print(f"    DRIVE:  expected 0xF59, got 0x{drive_val:03X}")
+        print(f"    TORQUE: 0x{torque_val:03X} (5000mA)")
+
+        if off_val == 0x020 and decay_val == 0x110 and drive_val == 0xF59:
+            print("    [OK] All J6 registers verified")
+        else:
+            print(f"    [!] WARNING: Register write mismatch!")
+
+    # Clear faults multiple times
+    print("[*] Clearing faults (multiple attempts)...")
+    for attempt in range(3):
+        driver._write_reg(REG_STATUS, 0)
+        time.sleep(0.02)
+        if not blind_mode:
+            status = driver._read_reg(REG_STATUS)
+            critical_faults = status & 0x3F  # Bits 0-5 are critical
+            if critical_faults == 0:
+                print(f"    [OK] Faults cleared on attempt {attempt+1}")
+                break
+            print(f"    [i] Attempt {attempt+1}: STATUS still 0x{status:03X}")
 
     print("[*] Enabling Driver...")
     driver.enable_driver()
