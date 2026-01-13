@@ -17,7 +17,7 @@ random.seed(42)
 SLEEP_PIN = 7
 
 # --- CONFIGURATION ---
-MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (7500mA, 100kHz PWM, 1/64 step)
+MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (8000mA, 100kHz PWM, 1/64 step)
 MIN_RPM = 0
 MAX_RPM = 300
 
@@ -58,60 +58,35 @@ def preload_resources():
     """Pre-render icons and load font at startup"""
     global CACHED_FONT, ICON_START, ICON_STOP
 
-    # Load font once
     try:
         CACHED_FONT = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15 * SCALE)
     except:
         CACHED_FONT = None
 
-    # Pre-render START icon (whole coffee beans)
+    # START icon (whole coffee beans)
     icon_img = Image.new('RGBA', (ICON_SIZE*2, ICON_SIZE*2), (0, 0, 0, 0))
     draw = ImageDraw.Draw(icon_img)
+    bean_w, bean_h, spacing = ICON_SIZE * 0.35, ICON_SIZE * 0.5, ICON_SIZE * 0.25
+    center_x, center_y = ICON_SIZE, ICON_SIZE
 
-    bean_w = ICON_SIZE * 0.35
-    bean_h = ICON_SIZE * 0.5
-    spacing = ICON_SIZE * 0.25
-    center_x = ICON_SIZE
-    center_y = ICON_SIZE
-
-    # Left bean
-    left_x = center_x - spacing
-    draw.ellipse([left_x - bean_w, center_y - bean_h,
-                 left_x + bean_w, center_y + bean_h],
-                fill=COL_TEXT)
-    # Bean groove (curved line on white bean)
-    groove_w = bean_w * 0.8
-    draw.arc([left_x - groove_w, center_y - bean_h*0.6,
-             left_x + groove_w, center_y + bean_h*0.6],
-            start=20, end=160, fill=COL_BTN_GO, width=int(3*SCALE))
-
-    # Right bean
-    right_x = center_x + spacing
-    draw.ellipse([right_x - bean_w, center_y - bean_h,
-                 right_x + bean_w, center_y + bean_h],
-                fill=COL_TEXT)
-    # Bean groove
-    draw.arc([right_x - groove_w, center_y - bean_h*0.6,
-             right_x + groove_w, center_y + bean_h*0.6],
-            start=20, end=160, fill=COL_BTN_GO, width=int(3*SCALE))
-
+    for offset in [-spacing, spacing]:
+        x = center_x + offset
+        draw.ellipse([x - bean_w, center_y - bean_h, x + bean_w, center_y + bean_h], fill=COL_TEXT)
+        groove_w = bean_w * 0.8
+        draw.arc([x - groove_w, center_y - bean_h*0.6, x + groove_w, center_y + bean_h*0.6],
+                start=20, end=160, fill=COL_BTN_GO, width=int(3*SCALE))
     ICON_START = icon_img
 
-    # Pre-render STOP icon (ground coffee particles)
+    # STOP icon (ground coffee particles)
     icon_img = Image.new('RGBA', (ICON_SIZE*2, ICON_SIZE*2), (0, 0, 0, 0))
     draw = ImageDraw.Draw(icon_img)
-
-    particle_count = 40
-    for _ in range(particle_count):
+    for _ in range(40):
         offset_x = random.uniform(-bean_w - spacing, bean_w + spacing)
         offset_y = random.uniform(-bean_h, bean_h)
         particle_size = random.uniform(1.5*SCALE, 3*SCALE)
-        draw.ellipse([center_x + offset_x - particle_size,
-                     center_y + offset_y - particle_size,
-                     center_x + offset_x + particle_size,
-                     center_y + offset_y + particle_size],
+        draw.ellipse([center_x + offset_x - particle_size, center_y + offset_y - particle_size,
+                     center_x + offset_x + particle_size, center_y + offset_y + particle_size],
                     fill=COL_TEXT)
-
     ICON_STOP = icon_img
 
 # --- HELPER FUNCTIONS ---
@@ -124,122 +99,83 @@ def get_angle(x, y):
     return (deg + 360) % 360
 
 def map_touch(x, y, debug=False):
-    """
-    Map touch to action - SIMPLE AND IMMEDIATE like original
-    Returns: "BUTTON" or RPM integer or None
-    """
-    dx = x - (W_REAL // 2)
-    dy = y - (H_REAL // 2)
+    """Map touch to action: returns 'BUTTON', RPM integer, or None"""
+    dx, dy = x - (W_REAL // 2), y - (H_REAL // 2)
     dist = math.sqrt(dx*dx + dy*dy)
 
-    if debug:
-        print(f"  map_touch: ({x},{y}) -> dist={dist:.1f}px from center")
-
-    # Button in center
     if dist < BUTTON_TOUCH_RADIUS:
-        if debug:
-            print(f"    → BUTTON (dist < {BUTTON_TOUCH_RADIUS}px)")
         return "BUTTON"
 
-    # Dead zone between button and slider (prevents accidental slider when pressing button)
-    DEAD_ZONE_OUTER = 45  # Small buffer zone
-    if dist < DEAD_ZONE_OUTER:
-        if debug:
-            print(f"    → DEAD ZONE (dist < {DEAD_ZONE_OUTER}px)")
+    if dist < 45:  # Dead zone
         return None
 
-    # Slider - calculate RPM from angle
     angle = get_angle(x, y)
-    eff_angle = angle
-    if eff_angle < 135:
-        eff_angle += 360
+    eff_angle = angle if angle >= 135 else angle + 360
 
-    if debug:
-        print(f"    angle={angle:.1f}°, eff_angle={eff_angle:.1f}°")
-
-    start, end = 135, 405
-    if start <= eff_angle <= end:
-        ratio = (eff_angle - start) / (end - start)
+    if 135 <= eff_angle <= 405:
+        ratio = (eff_angle - 135) / 270
         rpm_value = MIN_RPM + ratio * (MAX_RPM - MIN_RPM)
-        rpm_rounded = int(round(rpm_value / 5) * 5)
-        if debug:
-            print(f"    → SLIDER RPM={rpm_rounded} (angle in range)")
-        return rpm_rounded
+        return int(round(rpm_value / 5) * 5)
 
-    if debug:
-        print(f"    → None (angle out of range)")
     return None
 
 def draw_ui(disp, rpm, is_running):
     """Draws the UI at 2x resolution with cached resources"""
-    # Render at high resolution (2x)
     img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
     draw = ImageDraw.Draw(img)
 
-    # 1. Track (outer ring)
+    # Track and active arc
     bbox = [CENTER[0]-RADIUS_OUTER, CENTER[1]-RADIUS_OUTER,
             CENTER[0]+RADIUS_OUTER, CENTER[1]+RADIUS_OUTER]
     draw.pieslice(bbox, start=START_ANGLE, end=END_ANGLE, fill=COL_TRACK)
 
-    # 2. Active Arc
     fill_col = COL_ACTIVE_LOCKED if is_running else COL_ACTIVE
     ratio = (rpm - MIN_RPM) / (MAX_RPM - MIN_RPM)
     active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
     draw.pieslice(bbox, start=START_ANGLE, end=active_angle, fill=fill_col)
 
-    # 3. Center Hole
+    # Center hole
     mask_bbox = [CENTER[0]-RADIUS_INNER, CENTER[1]-RADIUS_INNER,
                  CENTER[0]+RADIUS_INNER, CENTER[1]+RADIUS_INNER]
     draw.ellipse(mask_bbox, fill=COL_BG)
 
-    # 4. Knob (only when not running)
+    # Knob (when stopped)
     if not is_running:
         knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2
         rad = math.radians(active_angle)
-        kx = CENTER[0] + knob_dist * math.cos(rad)
-        ky = CENTER[1] + knob_dist * math.sin(rad)
+        kx, ky = CENTER[0] + knob_dist * math.cos(rad), CENTER[1] + knob_dist * math.sin(rad)
         draw.ellipse([kx-KNOB_RADIUS, ky-KNOB_RADIUS, kx+KNOB_RADIUS, ky+KNOB_RADIUS], fill=COL_KNOB)
 
-    # 5. Button (center)
+    # Button
     btn_col = COL_BTN_STOP if is_running else COL_BTN_GO
     draw.ellipse([CENTER[0]-BUTTON_RADIUS, CENTER[1]-BUTTON_RADIUS,
-                  CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS],
-                 fill=btn_col)
+                  CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS], fill=btn_col)
 
-    # 6. Icon (use pre-rendered cached icon)
+    # Icon
     icon = ICON_STOP if is_running else ICON_START
     if icon:
-        icon_x = CENTER[0] - ICON_SIZE
-        icon_y = CENTER[1] - ICON_SIZE
-        img.paste(icon, (icon_x, icon_y), icon)
+        img.paste(icon, (CENTER[0] - ICON_SIZE, CENTER[1] - ICON_SIZE), icon)
 
-    # 7. RPM text below button (use cached font)
+    # RPM text
     if CACHED_FONT:
-        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm} RPM", font=CACHED_FONT, fill=(150,150,150), anchor="mm")
+        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm} RPM",
+                 font=CACHED_FONT, fill=(150,150,150), anchor="mm")
 
-    # 8. Downscale with anti-aliasing (LANCZOS for quality)
-    img = img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS)
-
-    disp.show_image(img)
+    disp.show_image(img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS))
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
 def start_motor_process(rpm, disp, config_id='K4'):
-    """Start motor process with specified config (close LCD SPI first to avoid conflict)"""
-    # CRITICAL: Close LCD's SPI before motor process opens it
-    # Both use SPI bus 0, device 0 and can't be open simultaneously
+    """Start motor process with specified config"""
     disp.close_spi_for_motor()
-
     script_dir = os.path.dirname(os.path.abspath(__file__))
     motor_script = os.path.join(script_dir, "motor_only.py")
-
-    proc = subprocess.Popen(
+    return subprocess.Popen(
         ["python3", motor_script, str(rpm), config_id],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
     )
-    return proc
 
 def stop_motor_process(proc, disp):
     """Stop motor process and reopen LCD SPI"""
@@ -251,51 +187,37 @@ def stop_motor_process(proc, disp):
             proc.kill()
             proc.wait()
 
-    # CRITICAL: Disable motor driver via sleep pin after killing subprocess
     try:
-        GPIO.output(SLEEP_PIN, GPIO.LOW)  # Disable motor driver
+        GPIO.output(SLEEP_PIN, GPIO.LOW)
     except Exception as e:
         print(f"ERROR: Failed to disable motor: {e}")
 
-    # Reopen LCD SPI (motor closed it when done)
     disp.reopen_spi_after_motor()
 
 # --- MAIN LOOP ---
 
 def main():
-    # Check for root/sudo (required for GPIO/I2C/SPI access)
     if os.geteuid() != 0:
         print("ERROR: This script must be run with sudo!")
         print("Usage: sudo python3 motor_control.py")
         return
 
-    # Initialize GPIO for motor sleep pin control
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
     GPIO.setup(SLEEP_PIN, GPIO.OUT)
-    GPIO.output(SLEEP_PIN, GPIO.LOW)  # Start with motor disabled
+    GPIO.output(SLEEP_PIN, GPIO.LOW)
 
-    # Pre-load resources (icons, font)
     preload_resources()
 
-    # Initialize display
     disp = LCD_1inch28()
     disp.init_display()
-
-    # Wait longer for display and I2C bus to stabilize
-    print("[*] Waiting for display to stabilize...")
     time.sleep(1.0)
 
-    # Initialize touch with retries
-    print("[*] Initializing touch controller...")
     touch = TouchScreen()
     if not touch.init():
-        print("[!] WARNING: Touch controller initialization failed, retrying...")
         time.sleep(1)
         if not touch.init():
-            print("[!] ERROR: Touch controller still not responding!")
-            print("[!] UI will show but touch input won't work")
-            print("[!] Check wiring: SDA=GPIO2, SCL=GPIO3, RST=GPIO21, INT=GPIO27")
+            print("WARNING: Touch controller not responding - UI will show but touch won't work")
 
     rpm = 200
     motor_proc = None
@@ -333,34 +255,22 @@ def main():
                             # Brief debounce
                             time.sleep(0.15)
 
-                # Check if motor process ended
+                # Check if motor process ended unexpectedly
                 if motor_proc and motor_proc.poll() is not None:
-                    exit_code = motor_proc.returncode
-
-                    # Always print subprocess output for debugging
-                    print(f"\n[!] Motor process ended with code {exit_code}")
-
-                    # Try to read any output
+                    print(f"Motor process ended with code {motor_proc.returncode}")
                     try:
-                        stdout_output = motor_proc.stdout.read()
-                        if stdout_output:
-                            print(f"Motor stdout:\n{stdout_output}")
+                        stdout = motor_proc.stdout.read()
+                        stderr = motor_proc.stderr.read()
+                        if stdout:
+                            print(f"stdout: {stdout}")
+                        if stderr:
+                            print(f"stderr: {stderr}")
                     except:
                         pass
 
-                    try:
-                        stderr_output = motor_proc.stderr.read()
-                        if stderr_output:
-                            print(f"Motor stderr:\n{stderr_output}")
-                    except:
-                        pass
-
-                    # Reopen LCD SPI and disable motor
-                    stop_motor_process(None, disp)  # None = already exited
+                    stop_motor_process(None, disp)
                     motor_proc = None
                     draw_ui(disp, rpm, is_running=False)
-
-                    # Prevent rapid cycling - wait a bit
                     time.sleep(0.5)
 
                 time.sleep(0.005)  # 200Hz update rate
@@ -376,7 +286,6 @@ def main():
     finally:
         if motor_proc:
             stop_motor_process(motor_proc, disp)
-        # Ensure motor is disabled
         try:
             GPIO.output(SLEEP_PIN, GPIO.LOW)
         except:

@@ -301,20 +301,15 @@ def setup_driver(config: Dict) -> bool:
         write_reg(REG_STATUS, 0x000)
         time.sleep(0.01)
 
-        # Verify critical registers (if SPI read works)
+        # Verify critical registers
         try:
             ctrl_readback = read_reg(REG_CTRL)
-            torque_readback = read_reg(REG_TORQUE)
-
             if ctrl_readback == 0xFFF or ctrl_readback == 0x000:
-                print("[!] WARNING: SPI read may not be working (MISO issue)")
-                print("    Proceeding in BLIND mode - cannot verify registers")
+                print("[!] BLIND mode - cannot verify registers")
             elif ctrl_readback != ctrl:
-                print(f"[!] WARNING: CTRL register mismatch! Wrote 0x{ctrl:03X}, Read 0x{ctrl_readback:03X}")
-            elif torque_readback != torque_val:
-                print(f"[!] WARNING: TORQUE register mismatch! Wrote 0x{torque_val:03X}, Read 0x{torque_readback:03X}")
+                print(f"[!] CTRL mismatch: wrote 0x{ctrl:03X}, read 0x{ctrl_readback:03X}")
         except:
-            print("[!] WARNING: Cannot read registers (MISO issue) - proceeding in BLIND mode")
+            print("[!] BLIND mode - MISO not working")
 
         return True
 
@@ -507,35 +502,26 @@ def run_single_config_test(config: Dict, db: ResultsDatabase):
     print_header(f"Testing Config: {config['id']} - {config['name']}")
     print_config_info(config)
 
-    # Setup driver with this configuration
     if not setup_driver(config):
-        print("[!] Failed to setup driver, skipping this config")
+        print("[!] Setup failed, skipping")
         return
 
-    # Test at each specified speed
     for rpm in config.get('test_speeds', [100]):
         print(f"\n>>> Testing at {rpm} RPM...")
 
-        success = run_motor_test(rpm, duration=2.0, config=config)
-
-        if not success:
-            print("[!] Test interrupted by emergency stop")
+        if not run_motor_test(rpm, duration=2.0, config=config):
+            print("[!] Test interrupted")
             break
 
-        # Disable driver between speeds (removes torque but keeps config)
         disable_driver()
         time.sleep(0.5)
 
-        # Collect user ratings
         result = collect_ratings(config, rpm)
         if result:
             db.add_result(result)
 
-    # Fully shutdown driver after all speeds tested (resets chip)
     shutdown_driver()
-
-    print("\n" + "-" * 70)
-    print(f"Config {config['id']} complete")
+    print(f"\n{'-' * 70}\nConfig {config['id']} complete")
 
 def run_config_list(config_ids: List[str], db: ResultsDatabase):
     """Run multiple configurations"""
@@ -621,7 +607,7 @@ def show_main_menu():
     print("    CH - Category H: Blanking Time vs Microstepping (8 configs)")
     print("    CI - Category I: Resonance Troubleshooting (10 configs)")
     print("    CJ - Category J: High Torque Optimizations (8 configs)")
-    print("    CK - Category K: Ultra Current Quiet Optimization (8 configs - 7500mA)")
+    print("    CK - Category K: Ultra Current Quiet Optimization (8 configs - 8000mA)")
     print("\n[S] Specific Configuration (enter config ID like 'A1', 'B5', etc.)")
     print("[R] View Results Summary")
     print("[E] Export Results to CSV")

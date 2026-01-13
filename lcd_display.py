@@ -68,7 +68,6 @@ class LCD_1inch28:
             try:
                 self.spi.close()
                 self.spi_open = False
-                print("[*] LCD SPI closed for motor use")
             except Exception as e:
                 print(f"WARNING: Failed to close LCD SPI: {e}")
 
@@ -77,10 +76,9 @@ class LCD_1inch28:
         if not self.spi_open:
             try:
                 self.spi.open(self.spi_bus, self.spi_device)
-                self.spi.max_speed_hz = 80000000  # 80MHz for LCD
+                self.spi.max_speed_hz = 80000000
                 self.spi.mode = 0b00
                 self.spi_open = True
-                print("[*] LCD SPI reopened after motor stop")
             except Exception as e:
                 print(f"ERROR: Failed to reopen LCD SPI: {e}")
 
@@ -198,9 +196,6 @@ class LCD_1inch28:
 
     def show_image(self, image):
         """Display a PIL Image on the screen"""
-        # Note: motor_control.py now properly closes/reopens SPI
-        # No need for corruption detection
-
         if image.mode != 'RGB':
             image = image.convert('RGB')
 

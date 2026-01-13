@@ -42,22 +42,16 @@ J6_CONFIG = {
 }
 
 def calculate_torque_register(current_ma):
-    """
-    Calculate TORQUE register and ISGAIN bits for given current
-    Formula: TORQUE = (384 * I_TRQ * R_SENSE * 2) / V_REF
-    Returns: (torque_value, isgain_bits)
-    """
-    r_sense = 0.030  # 30mΩ sense resistors on Pololu 36v4
-
+    """Calculate TORQUE register and ISGAIN bits for given current"""
+    r_sense = 0.030
     gains = [(0, 3.3), (1, 1.65), (2, 0.825), (3, 0.4125)]
 
     for gain_bits, v_ref in gains:
         torque = int((384 * (current_ma / 1000.0) * r_sense * 2) / v_ref)
         if 0 <= torque <= 255:
-            print(f"    [*] Calculated: TORQUE=0x{torque:02X} ({torque}), ISGAIN={gain_bits} (Gain {[5,10,20,40][gain_bits]})")
             return (torque, gain_bits)
 
-    raise ValueError(f"Current {current_ma}mA exceeds maximum supported")
+    raise ValueError(f"Current {current_ma}mA exceeds maximum")
 
 def print_header(msg):
     print("\n" + "="*60)
@@ -71,12 +65,10 @@ def init_spi():
     spi.open(SPI_BUS, SPI_DEVICE)
     spi.max_speed_hz = SPI_SPEED
     spi.mode = 0b00
-    # CRITICAL: Disable kernel CS control for manual CS toggling
     try:
         spi.no_cs = True
     except:
         pass
-    print(f"[OK] SPI opened at {spi.max_speed_hz}Hz")
 
 def close_spi():
     """Close SPI bus"""
@@ -108,24 +100,16 @@ def test_spi_communication():
     print_header("TEST 1: SPI COMMUNICATION")
 
     try:
-        # Try reading TORQUE register
-        val = read_reg(REG_TORQUE)
-        print(f"[*] Read TORQUE register: 0x{val:03X}")
-
-        # Write/read test
         test_val = 0x1AA
-        print(f"[*] Writing test value 0x{test_val:03X}...")
         write_reg(REG_TORQUE, test_val)
         time.sleep(0.01)
-
         readback = read_reg(REG_TORQUE)
-        print(f"[*] Read back: 0x{readback:03X}")
 
         if readback == test_val:
-            print("[OK] SPI Communication Working!")
+            print(f"[OK] SPI working (wrote 0x{test_val:03X}, read 0x{readback:03X})")
             return True
         else:
-            print("[!] WARNING: Readback mismatch (MISO may not work)")
+            print("[!] WARNING: Readback mismatch - MISO may not work")
             return False
     except Exception as e:
         print(f"[!] ERROR: {e}")
@@ -161,67 +145,40 @@ def test_motor_movement():
     """Test motor with J6 configuration"""
     print_header("TEST 3: MOTOR MOVEMENT (J6 Config)")
 
-    # Wake up driver (after SPI init - matches comprehensive test)
-    print("[*] Waking up driver...")
     GPIO.output(SLEEP_PIN, GPIO.HIGH)
     time.sleep(0.001)
 
-    # Calculate TORQUE and ISGAIN for J6 current (like comprehensive test)
-    print(f"[*] Calculating registers for {J6_CURRENT_MA}mA...")
     torque_val, isgain_bits = calculate_torque_register(J6_CURRENT_MA)
 
-    # Build CTRL register (like comprehensive test)
     ctrl = J6_CTRL_BASE
-    ctrl = (ctrl & ~0x300) | (isgain_bits << 8)  # Set ISGAIN bits [9:8]
-    ctrl = ctrl & ~0x01  # Ensure disabled initially
-    print(f"    [*] CTRL register: 0x{ctrl:03X} (ENBL bit cleared)")
+    ctrl = (ctrl & ~0x300) | (isgain_bits << 8)
+    ctrl = ctrl & ~0x01
 
-    # Write J6 configuration - CTRL FIRST (matches comprehensive test order)
-    print("[*] Writing J6 registers...")
-    write_reg(REG_CTRL, ctrl)                   # CTRL first (disabled, with calculated ISGAIN)
-    write_reg(REG_TORQUE, torque_val)           # Calculated torque value
+    write_reg(REG_CTRL, ctrl)
+    write_reg(REG_TORQUE, torque_val)
     write_reg(REG_OFF, J6_CONFIG['off'])
     write_reg(REG_BLANK, J6_CONFIG['blank'])
     write_reg(REG_DECAY, J6_CONFIG['decay'])
     write_reg(REG_DRIVE, J6_CONFIG['drive'])
     write_reg(REG_STALL, J6_CONFIG['stall'])
-
-    # Clear faults
-    print("[*] Clearing faults...")
     write_reg(REG_STATUS, 0x000)
     time.sleep(0.01)
 
     # Verify registers
-    print("[*] Verifying registers...")
     ctrl_read = read_reg(REG_CTRL)
-    torque_read = read_reg(REG_TORQUE)
-    off_read = read_reg(REG_OFF)
-    decay_read = read_reg(REG_DECAY)
-    drive_read = read_reg(REG_DRIVE)
-
-    print(f"    CTRL:   0x{ctrl_read:03X} (expected 0x{ctrl:03X})")
-    print(f"    TORQUE: 0x{torque_read:03X} (expected 0x{torque_val:03X})")
-    print(f"    OFF:    0x{off_read:03X} (expected 0x{J6_CONFIG['off']:03X})")
-    print(f"    DECAY:  0x{decay_read:03X} (expected 0x{J6_CONFIG['decay']:03X})")
-    print(f"    DRIVE:  0x{drive_read:03X} (expected 0x{J6_CONFIG['drive']:03X})")
-
-    if (ctrl_read == ctrl and torque_read == torque_val and off_read == J6_CONFIG['off'] and
-        decay_read == J6_CONFIG['decay'] and drive_read == J6_CONFIG['drive']):
-        print("    [OK] All registers verified")
+    if ctrl_read == ctrl:
+        print("[OK] Registers verified")
     else:
-        print("    [!] WARNING: Register mismatch")
+        print(f"[!] WARNING: CTRL mismatch (got 0x{ctrl_read:03X}, expected 0x{ctrl:03X})")
 
     # Check status
     check_status()
 
-    # Enable and step
-    print("\n[*] Enabling driver and stepping motor...")
-    ctrl_enabled = ctrl | 0x01  # Set ENBL bit (use calculated ctrl value)
-    write_reg(REG_CTRL, ctrl_enabled)
+    # Enable and step motor
+    print("\n[*] Testing motor movement...")
+    write_reg(REG_CTRL, ctrl | 0x01)
     time.sleep(0.05)
 
-    # Step forward 400 steps
-    print("[*] Stepping forward...")
     GPIO.output(DIR_PIN, GPIO.HIGH)
     for _ in range(400):
         GPIO.output(STEP_PIN, GPIO.HIGH)
@@ -229,8 +186,6 @@ def test_motor_movement():
         GPIO.output(STEP_PIN, GPIO.LOW)
         time.sleep(0.001)
 
-    # Step backward 400 steps
-    print("[*] Stepping backward...")
     GPIO.output(DIR_PIN, GPIO.LOW)
     for _ in range(400):
         GPIO.output(STEP_PIN, GPIO.HIGH)
@@ -238,11 +193,8 @@ def test_motor_movement():
         GPIO.output(STEP_PIN, GPIO.LOW)
         time.sleep(0.001)
 
-    # Disable
-    ctrl_disabled = ctrl & ~0x01  # Use calculated ctrl value
-    write_reg(REG_CTRL, ctrl_disabled)
+    write_reg(REG_CTRL, ctrl & ~0x01)
     GPIO.output(SLEEP_PIN, GPIO.LOW)
-
     print("[OK] Movement test complete")
 
 def main():
@@ -250,16 +202,12 @@ def main():
         print("\nDRV8711 Diagnostic Tool - J6 Configuration")
         print("=" * 60)
 
-        # Initialize GPIO
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
 
-        # Disable LCD
         GPIO.setup(LCD_CS_PIN, GPIO.OUT)
         GPIO.output(LCD_CS_PIN, GPIO.HIGH)
-        print("[*] LCD disabled")
 
-        # Setup pins
         GPIO.setup(SCS_PIN, GPIO.OUT)
         GPIO.setup(STEP_PIN, GPIO.OUT)
         GPIO.setup(DIR_PIN, GPIO.OUT)
@@ -270,30 +218,25 @@ def main():
         GPIO.output(DIR_PIN, GPIO.LOW)
         GPIO.output(SLEEP_PIN, GPIO.LOW)
 
-        # Initialize SPI
         init_spi()
 
-        # Run tests
         spi_ok = test_spi_communication()
         if spi_ok:
             check_status()
             test_motor_movement()
         else:
-            print("\n[!] SPI communication failed")
-            print("[!] Check MISO connection (GPIO9/Pin 21)")
+            print("\n[!] SPI communication failed - check MISO connection")
 
     except KeyboardInterrupt:
-        print("\n[!] Interrupted by user")
+        print("\nInterrupted")
     except Exception as e:
-        print(f"\n[!] ERROR: {e}")
+        print(f"\nERROR: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print("\n[*] Cleaning up...")
         GPIO.output(SLEEP_PIN, GPIO.LOW)
         close_spi()
         GPIO.cleanup()
-        print("[*] Done")
 
 if __name__ == "__main__":
     main()

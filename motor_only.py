@@ -71,7 +71,6 @@ def calculate_torque_register(current_ma):
     for gain_bits, v_ref in gains:
         torque = int((384 * (current_ma / 1000.0) * r_sense * 2) / v_ref)
         if 0 <= torque <= 255:
-            print(f"    Calculated: TORQUE=0x{torque:02X}, ISGAIN={gain_bits}")
             return (torque, gain_bits)
 
     raise ValueError(f"Current {current_ma}mA too high")
@@ -87,7 +86,6 @@ def init_spi():
         spi.no_cs = True  # Manual CS control for Pololu
     except:
         pass
-    print(f"    SPI opened at {spi.max_speed_hz}Hz")
 
 def close_spi():
     global spi
@@ -126,131 +124,74 @@ def run_motor(target_rpm, config_id='J6'):
     motor_config = load_motor_config(config_id)
 
     print(f"\n{'='*60}")
-    print(f"  Motor Control Starting")
-    print(f"  Config: {config_id} - {motor_config['name']}")
-    print(f"  Target: {target_rpm} RPM")
-    print(f"{'='*60}")
-    print(f"  Current: {motor_config['current_ma']}mA")
-    print(f"  PWM: {motor_config['pwm_freq_khz']}kHz")
-    print(f"  Decay: {motor_config['decay_name']}")
-    print(f"  Drive: {motor_config['drive_name']}")
-    print(f"  Microstepping: 1/{motor_config['microstep_divider']}")
+    print(f"Motor: {config_id} - {motor_config['name']}")
+    print(f"Target: {target_rpm} RPM | Current: {motor_config['current_ma']}mA | PWM: {motor_config['pwm_freq_khz']}kHz")
     print(f"{'='*60}")
 
     # Initialize GPIO
-    print("\n[*] Initializing GPIO...")
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
-
-    # CRITICAL: Disable LCD to prevent SPI MISO conflicts (like comprehensive test)
     GPIO.setup(LCD_CS_PIN, GPIO.OUT)
     GPIO.output(LCD_CS_PIN, GPIO.HIGH)
-    print("    [OK] LCD disabled (CS HIGH)")
-
-    # Setup motor pins
     GPIO.setup(SCS_PIN, GPIO.OUT)
     GPIO.setup(STEP_PIN, GPIO.OUT)
     GPIO.setup(DIR_PIN, GPIO.OUT)
     GPIO.setup(SLEEP_PIN, GPIO.OUT)
-
-    GPIO.output(SCS_PIN, GPIO.LOW)  # CS inactive (LOW for Pololu active-HIGH)
+    GPIO.output(SCS_PIN, GPIO.LOW)
     GPIO.output(STEP_PIN, GPIO.LOW)
     GPIO.output(DIR_PIN, GPIO.LOW)
-    GPIO.output(SLEEP_PIN, GPIO.LOW)  # Start with SLEEP LOW (like comprehensive test)
+    GPIO.output(SLEEP_PIN, GPIO.LOW)
 
-    # CRITICAL: Ensure SPI bus is closed first (LCD or previous run may have left it open)
-    print("[*] Ensuring SPI bus is closed...")
+    # Ensure SPI is closed before opening
     try:
-        import spidev
         spi_test = spidev.SpiDev()
         try:
             spi_test.open(0, 0)
             spi_test.close()
-            print("    [OK] SPI bus was open, now closed")
         except:
-            print("    [OK] SPI bus was already closed")
-    except Exception as e:
-        print(f"    [!] Could not check SPI state: {e}")
+            pass
+    except:
+        pass
 
-    # Initialize SPI (before waking chip - like comprehensive test)
-    print("[*] Initializing SPI at 500kHz...")
+    # Initialize SPI
     init_spi()
 
-    # Calculate TORQUE and ISGAIN for motor current (like comprehensive test)
-    print(f"[*] Calculating registers for {motor_config['current_ma']}mA...")
+    # Calculate and configure registers
     torque_val, isgain_bits = calculate_torque_register(motor_config['current_ma'])
-
-    # Build CTRL register (like comprehensive test)
     ctrl = motor_config['ctrl_base']
-    ctrl = (ctrl & ~0x300) | (isgain_bits << 8)  # Set ISGAIN bits [9:8]
-    ctrl = ctrl & ~0x01  # Ensure disabled initially
-    print(f"    [*] CTRL register: 0x{ctrl:03X} (ENBL bit cleared)")
+    ctrl = (ctrl & ~0x300) | (isgain_bits << 8)
+    ctrl = ctrl & ~0x01
 
-    # CRITICAL: Wake up driver AFTER SPI init (matches comprehensive test exactly)
-    print("[*] Waking up driver...")
+    # Wake driver and write configuration
     GPIO.output(SLEEP_PIN, GPIO.HIGH)
-    time.sleep(0.001)  # 1ms like comprehensive test
-
-    # CRITICAL: Write registers in EXACT order as comprehensive test
-    # Write CTRL FIRST with disabled bit, then other registers
-    print(f"[*] Writing {config_id} configuration...")
-    write_reg(REG_CTRL, ctrl)                     # CTRL first (disabled, with calculated ISGAIN)
-    write_reg(REG_TORQUE, torque_val)             # Calculated torque value
-    write_reg(REG_OFF, motor_config['off'])       # PWM frequency
-    write_reg(REG_BLANK, motor_config['blank'])   # Blanking time / ABT
-    write_reg(REG_DECAY, motor_config['decay'])   # Decay mode
-    write_reg(REG_DRIVE, motor_config['drive'])   # Gate drive current
-    write_reg(REG_STALL, motor_config['stall'])   # Stall detection
-    print("    [*] All registers written")
-
-    # Clear faults (like comprehensive test)
-    print("[*] Clearing faults...")
+    time.sleep(0.001)
+    write_reg(REG_CTRL, ctrl)
+    write_reg(REG_TORQUE, torque_val)
+    write_reg(REG_OFF, motor_config['off'])
+    write_reg(REG_BLANK, motor_config['blank'])
+    write_reg(REG_DECAY, motor_config['decay'])
+    write_reg(REG_DRIVE, motor_config['drive'])
+    write_reg(REG_STALL, motor_config['stall'])
     write_reg(REG_STATUS, 0x000)
     time.sleep(0.01)
-    print("    [*] Faults cleared")
 
-    # Verify configuration by reading registers (OPTIONAL - works in BLIND mode if MISO broken)
-    print("[*] Verifying configuration...")
+    # Verify configuration
     try:
         ctrl_readback = read_reg(REG_CTRL)
         if ctrl_readback == 0xFFF or ctrl_readback == 0x000:
-            print("    [!] WARNING: SPI MISO not working (reads 0xFFF)")
-            print("    [i] Continuing in BLIND mode - motor should still work")
-        else:
-            torque_readback = read_reg(REG_TORQUE)
-            off_readback = read_reg(REG_OFF)
-            decay_readback = read_reg(REG_DECAY)
-            drive_readback = read_reg(REG_DRIVE)
+            print("BLIND mode - MISO not working")
+        elif ctrl_readback != ctrl:
+            print(f"Warning: Register mismatch")
+    except:
+        print("BLIND mode")
 
-            print(f"    CTRL:   0x{ctrl_readback:03X} (expected 0x{ctrl:03X})")
-            print(f"    TORQUE: 0x{torque_readback:03X} (expected 0x{torque_val:03X})")
-            print(f"    OFF:    0x{off_readback:03X} (expected 0x{motor_config['off']:03X})")
-            print(f"    DECAY:  0x{decay_readback:03X} (expected 0x{motor_config['decay']:03X})")
-            print(f"    DRIVE:  0x{drive_readback:03X} (expected 0x{motor_config['drive']:03X})")
-
-            if (ctrl_readback == ctrl and
-                torque_readback == torque_val and
-                off_readback == motor_config['off'] and
-                decay_readback == motor_config['decay'] and
-                drive_readback == motor_config['drive']):
-                print(f"    [OK] All {config_id} registers verified")
-            else:
-                print("    [!] WARNING: Register mismatch - continuing anyway")
-    except Exception as e:
-        print(f"    [!] WARNING: Cannot read registers: {e}")
-        print("    [i] Continuing in BLIND mode")
-
-    # Set direction and enable driver (set ENBL bit in CTRL)
-    print(f"\n[*] Enabling driver and starting motor at {target_rpm} RPM...")
+    # Enable driver and start motor
+    print(f"\nStarting motor at {target_rpm} RPM (Ctrl+C to stop)\n")
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
-    ctrl_enabled = ctrl | 0x01  # Set ENBL bit (use calculated ctrl value)
+    ctrl_enabled = ctrl | 0x01
     write_reg(REG_CTRL, ctrl_enabled)
     time.sleep(0.001)
-
-    # Close SPI - only GPIO needed for stepping
     close_spi()
-    print("[*] SPI closed, entering high-speed stepping loop...")
-    print("[*] Press Ctrl+C to stop\n")
 
     # Calculate delays (using config microstepping)
     steps_rev = 200
@@ -278,12 +219,10 @@ def run_motor(target_rpm, config_id='J6'):
             while time.perf_counter() < t_next: pass
 
     except KeyboardInterrupt:
-        print("\n[*] Shutdown requested...")
+        print("\nStopping...")
     finally:
-        # Disable driver completely
-        print("[*] Disabling driver...")
         GPIO.output(SLEEP_PIN, GPIO.LOW)
-        print("[*] Motor stopped")
+        print("Motor stopped")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or len(sys.argv) > 3:

@@ -60,37 +60,34 @@ class TouchScreen:
             # Reset touch controller
             self.reset()
 
-            # Initialize I2C (wait a bit after reset)
             time.sleep(0.1)
             try:
                 self.bus = smbus2.SMBus(self.i2c_bus)
             except Exception as e:
-                print(f"ERROR: Failed to open I2C bus {self.i2c_bus}: {e}")
+                print(f"ERROR: Failed to open I2C bus: {e}")
                 return False
 
-            # Check if device is present (with more retries and longer delays)
             device_found = False
             for attempt in range(5):
                 if self.who_am_i():
                     device_found = True
                     break
-                if attempt < 4:  # Don't sleep on last attempt
-                    time.sleep(0.2)  # Longer delay between retries
+                if attempt < 4:
+                    time.sleep(0.2)
 
             if device_found:
                 try:
                     self.read_revision()
                 except:
                     pass
-
                 self.stop_sleep()
                 return True
             else:
-                print("ERROR: Touch controller not detected (expected chip ID 0xB5)")
+                print("ERROR: Touch controller not detected")
                 return False
 
         except Exception as e:
-            print(f"ERROR: Touch initialization failed: {e}")
+            print(f"ERROR: Touch init failed: {e}")
             return False
 
     def reset(self):
@@ -214,9 +211,6 @@ class TouchScreen:
                     # Apply filtering
                     filtered_x, filtered_y = self.filter_coordinates(x, y)
 
-                    # Disable hysteresis check - we want immediate response for slider
-                    # (Original code had no hysteresis and worked fine)
-
                     # Update state
                     self.x = filtered_x
                     self.y = filtered_y
@@ -304,8 +298,7 @@ class TouchScreen:
         try:
             if self.bus:
                 self.bus.close()
-            # Don't call GPIO.cleanup() - other components (display, motor) still use GPIO
-            # Just cleanup our specific pins
+            # Reset pins to input (don't call GPIO.cleanup - other components use GPIO)
             GPIO.setup(self.TP_RST, GPIO.IN)
             GPIO.setup(self.TP_INT, GPIO.IN)
         except:
