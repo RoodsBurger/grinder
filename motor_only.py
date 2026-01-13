@@ -52,51 +52,18 @@ def run_motor(target_rpm):
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
 
-    # CONFIGURATION: Pololu + 32step + ABT (quietest recommended settings)
-    # Based on official Pololu library + noise optimization testing
-    current = 4200  # Match motor rated current (4.2A)
-    step_mode = 32  # 1/32 microstepping (very smooth, quiet)
+    # Configure driver using high-level API
+    # Library defaults are already optimized (ABT enabled, 41.7kHz PWM, Auto-Mixed decay)
+    driver.reset_settings()
+    driver.set_current_milliamps(4200)  # Match motor rated current (4.2A)
+    driver.set_step_mode(32)  # 1/32 microstepping for smoothest, quietest operation
 
-    # Configure current (this calculates ISGAIN and TORQUE)
-    driver.set_current_milliamps(current)
-
-    # Custom register configuration
-    # Reference: combo_pololu_32step from test_motor_noise.py
-    CTRL_CUSTOM  = 0xC28  # 1/32 step mode (bits 6:3 = 0101)
-    OFF_POLOLU   = 0x030  # 24µs = 41.7kHz PWM (ABOVE audible range!)
-    BLANK_ABT    = 0x180  # ABT enabled (bit 8 set) for smooth 1/32 stepping
-    DECAY_AUTO   = 0x510  # Auto-Mixed decay (TI recommended)
-    DRIVE_POLOLU = 0xA59  # 150/300mA gate drive (Pololu default)
-
-    # Preserve ISGAIN from set_current_milliamps, merge with custom step mode
-    isgain_bits = driver.regs[0x00] & 0x0300  # Extract ISGAIN (bits 9:8)
-    merged_ctrl = (CTRL_CUSTOM & ~0x0300) | isgain_bits  # Merge
-
-    # Update cache (CRITICAL: enable_driver() reads from cache!)
-    driver.regs[0x00] = merged_ctrl
-    driver.regs[0x02] = OFF_POLOLU
-    driver.regs[0x03] = BLANK_ABT
-    driver.regs[0x04] = DECAY_AUTO
-    driver.regs[0x06] = DRIVE_POLOLU
-
-    # Update step_mode_val for correct RPM calculations
-    driver.step_mode_val = 5  # 1/32 step (index 5 in step map)
-
-    # Write all registers to hardware
-    driver._write_reg(0x02, driver.regs[0x02])  # OFF
-    driver._write_reg(0x03, driver.regs[0x03])  # BLANK
-    driver._write_reg(0x04, driver.regs[0x04])  # DECAY
-    driver._write_reg(0x06, driver.regs[0x06])  # DRIVE
-    driver._write_reg(0x00, driver.regs[0x00])  # CTRL (write last)
-
-    # Set direction
+    # Set direction and enable
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
-
-    # Enable driver (uses cached CTRL value)
     driver.enable_driver()
     driver.clear_faults()
 
-    # Close SPI - only GPIO needed now
+    # Close SPI - only GPIO needed for stepping
     driver.spi.close()
 
     # Calculate delays

@@ -43,14 +43,15 @@ class HighPowerStepperDriver:
         self.reset_pin = reset_pin
         self.cs_pin = cs_pin
 
-        # Default Register Values (Pololu official library defaults)
+        # Default Register Values (Optimized for quiet operation + Pololu base)
         # Reference: https://github.com/pololu/high-power-stepper-driver-arduino
+        # Based on combo_pololu_32step testing - quietest proven configuration
         self.regs = {
-            REG_CTRL:   0xC10, # Gain 5, 1/4 Step, disabled
-            REG_TORQUE: 0x1FF, # Default torque (will be recalculated by set_current)
-            REG_OFF:    0x030, # 24µs = 41.7kHz PWM (ABOVE AUDIBLE!)
-            REG_BLANK:  0x080, # 2.56µs blank time
-            REG_DECAY:  0x510, # Auto-Mixed (Pololu examples recommend this over 0x110)
+            REG_CTRL:   0xC10, # Gain 5, 1/4 Step default (use set_step_mode() to change)
+            REG_TORQUE: 0x1FF, # Default torque (recalculated by set_current_milliamps)
+            REG_OFF:    0x030, # 24µs = 41.7kHz PWM (ABOVE audible - Pololu default)
+            REG_BLANK:  0x180, # 2.56µs + ABT enabled (bit 8) for smooth microstepping
+            REG_DECAY:  0x510, # Auto-Mixed (TI recommended, Pololu example uses this)
             REG_STALL:  0x040, # Default stall detection
             REG_DRIVE:  0xA59, # IDRIVEP=150mA, IDRIVEN=300mA (Pololu default)
         }
@@ -145,22 +146,22 @@ class HighPowerStepperDriver:
 
     def reset_settings(self):
         """
-        Resets all registers to power-on defaults.
-        Matches Pololu HighPowerStepperDriver::resetSettings()
+        Resets all registers to optimized defaults.
+        Based on Pololu library + noise optimization (ABT enabled vs Pololu 0x080).
         """
         if self.reset_pin:
             GPIO.output(self.reset_pin, GPIO.HIGH)
             time.sleep(0.001)
             GPIO.output(self.reset_pin, GPIO.LOW)
 
-        # Restore default values
-        self.regs[REG_CTRL]   = 0xC10
-        self.regs[REG_TORQUE] = 0x1FF
-        self.regs[REG_OFF]    = 0x030
-        self.regs[REG_BLANK]  = 0x080
-        self.regs[REG_DECAY]  = 0x510  # Using AutoMixed (Pololu examples recommend)
-        self.regs[REG_STALL]  = 0x040
-        self.regs[REG_DRIVE]  = 0xA59
+        # Restore default values (optimized for quiet operation)
+        self.regs[REG_CTRL]   = 0xC10  # Gain 5, 1/4 step, disabled
+        self.regs[REG_TORQUE] = 0x1FF  # Default torque
+        self.regs[REG_OFF]    = 0x030  # 24µs = 41.7kHz (Pololu default)
+        self.regs[REG_BLANK]  = 0x180  # ABT enabled (vs Pololu 0x080)
+        self.regs[REG_DECAY]  = 0x510  # Auto-Mixed (Pololu examples use this)
+        self.regs[REG_STALL]  = 0x040  # Default stall
+        self.regs[REG_DRIVE]  = 0xA59  # 150/300mA (Pololu default)
 
         self.step_mode_val = 2  # Track 1/4 step default
         self.apply_settings()  # Write to hardware
