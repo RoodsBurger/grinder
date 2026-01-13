@@ -158,7 +158,7 @@ def setup_driver(config):
     time.sleep(0.1)
 
 def run_test(rpm=150, duration=5):
-    """Run motor at specified RPM"""
+    """Run motor at specified RPM with precise timing"""
     print(f"\n[*] Running motor at {rpm} RPM for {duration}s...")
 
     steps_per_rev = 200
@@ -169,12 +169,19 @@ def run_test(rpm=150, duration=5):
     GPIO.output(DIR_PIN, 1)
     total_steps = int(steps_per_sec * duration)
 
-    # Stepping loop
+    print(f"[*] Step delay: {step_delay*1000:.3f}ms ({steps_per_sec:.1f} steps/sec)")
+
+    # Precise timing using perf_counter (same as motor_only.py)
+    t_next = time.perf_counter()
+
     for i in range(total_steps):
         GPIO.output(STEP_PIN, GPIO.HIGH)
-        time.sleep(0.000002)
+        t_pulse = time.perf_counter()
+        while time.perf_counter() - t_pulse < 0.000002: pass
         GPIO.output(STEP_PIN, GPIO.LOW)
-        time.sleep(step_delay - 0.000002)
+
+        t_next += step_delay
+        while time.perf_counter() < t_next: pass
 
     print("[*] Test complete")
 
