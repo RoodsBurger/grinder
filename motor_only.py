@@ -118,20 +118,38 @@ def run_motor(target_rpm):
     print(f"  Motor Control Starting - Target: {target_rpm} RPM")
     print(f"{'='*60}")
 
-    # CRITICAL: Power cycle the motor driver chip to clear any latched faults
-    print("\n[*] Power cycling motor driver to clear latched faults...")
+    # CRITICAL: Ensure SPI bus is properly closed first (LCD may have left it open)
+    print("\n[*] Ensuring SPI bus is closed...")
+    try:
+        import spidev
+        spi_test = spidev.SpiDev()
+        try:
+            spi_test.open(0, 0)
+            spi_test.close()
+            print("    [OK] SPI bus was open, now closed")
+        except:
+            print("    [OK] SPI bus was already closed")
+    except Exception as e:
+        print(f"    [!] Could not check SPI state: {e}")
+
+    # Power cycle the motor driver chip to clear any latched faults
+    print("[*] Power cycling motor driver to clear latched faults...")
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(SLEEP_PIN, GPIO.OUT)
     GPIO.output(SLEEP_PIN, GPIO.LOW)   # Power down
-    time.sleep(0.1)  # Wait for chip to fully power down
+    time.sleep(0.2)  # Longer power down
     GPIO.output(SLEEP_PIN, GPIO.HIGH)  # Power up
-    time.sleep(0.1)  # Wait for chip to boot
+    time.sleep(0.2)  # Longer boot time
 
-    # Initialize motor driver
+    # Initialize motor driver (will open SPI at correct 500kHz)
+    print("[*] Initializing motor driver at 500kHz SPI...")
     driver = HighPowerStepperDriver(
         spi_bus=0, spi_device=0,
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
+
+    # Verify SPI is at correct speed
+    print(f"    [OK] SPI opened at {driver.spi.max_speed_hz}Hz")
 
     # Configure driver with J6 optimized settings
     print("[*] Configuring DRV8711 driver with J6 settings...")
@@ -139,7 +157,8 @@ def run_motor(target_rpm):
     driver.set_current_milliamps(5000)  # 119% rated - optimal torque/noise balance
     driver.set_step_mode(32)  # 1/32 microstepping for smoothest, quietest operation
 
-    # Override defaults with J6 optimizations
+    # Override defaults with J6 optimizations (write and verify each)
+    print("[*] Writing J6 register overrides...")
     driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM (quieter than 41.7kHz)
     driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay (better torque, still quiet)
     driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX (strong gate drive)
@@ -149,6 +168,34 @@ def run_motor(target_rpm):
 
     # Verify configuration by reading registers
     can_read_spi = verify_registers(driver)
+
+    # CRITICAL: Check if register writes actually worked
+    if can_read_spi:
+        off_val = driver._read_reg(REG_OFF)
+        decay_val = driver._read_reg(REG_DECAY)
+        drive_val = driver._read_reg(REG_DRIVE)
+        stall_val = driver._read_reg(REG_STALL)
+
+        errors = []
+        if off_val != 0x020: errors.append(f"OFF: wrote 0x020, read 0x{off_val:03X}")
+        if decay_val != 0x110: errors.append(f"DECAY: wrote 0x110, read 0x{decay_val:03X}")
+        if drive_val != 0xF59: errors.append(f"DRIVE: wrote 0xF59, read 0x{drive_val:03X}")
+        if stall_val != 0x040: errors.append(f"STALL: wrote 0x040, read 0x{stall_val:03X}")
+
+        if errors:
+            print("\n[!] CRITICAL: SPI WRITE VERIFICATION FAILED!")
+            print("    Register readback errors:")
+            for err in errors:
+                print(f"      - {err}")
+            print("    This indicates SPI communication is corrupted")
+            print("    Possible causes:")
+            print("      - SPI speed mismatch (should be 500kHz)")
+            print("      - SPI bus not properly reset after LCD use")
+            print("      - Hardware SPI connection issue")
+            driver.disable_driver()
+            return
+        else:
+            print("    [OK] All register writes verified")
 
     # Clear faults multiple times - sometimes chip needs multiple writes
     if can_read_spi:
