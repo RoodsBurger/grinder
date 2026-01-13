@@ -71,8 +71,9 @@ def check_status(driver):
     """Check STATUS register for faults"""
     try:
         status = driver._read_reg(REG_STATUS)
+        print(f"    STATUS: 0x{status:03X} (binary: {status:012b})")
 
-        # Check critical faults
+        # Check critical faults (bits 0-5)
         faults = []
         if status & (1 << 5): faults.append("UVLO (Under Voltage)")
         if status & (1 << 4): faults.append("BPDF (Ch B Predriver Fault)")
@@ -81,10 +82,17 @@ def check_status(driver):
         if status & (1 << 1): faults.append("AOCP (Ch A Over Current)")
         if status & (1 << 0): faults.append("OTS (Over Temperature)")
 
+        # Note: Bits 6-7 are stall warnings (STD, STDLAT) - not critical for startup
+        if status & (1 << 6):
+            print(f"    [i] STD (Stall Detected) - motor stationary, normal at startup")
+        if status & (1 << 7):
+            print(f"    [i] STDLAT (Latched Stall) - motor was stationary, normal at startup")
+
         if faults:
-            print(f"\n[!] CRITICAL FAULTS DETECTED: {', '.join(faults)}")
+            print(f"    [!] CRITICAL FAULTS: {', '.join(faults)}")
             return False
 
+        print(f"    [OK] No critical faults")
         return True
     except:
         return True  # Assume OK if can't read
@@ -126,6 +134,7 @@ def run_motor(target_rpm):
     driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM (quieter than 41.7kHz)
     driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay (better torque, still quiet)
     driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX (strong gate drive)
+    driver._write_reg(REG_STALL, 0x040)   # Default stall detection
     # BLANK already set to 0x180 (ABT enabled) by reset_settings()
     time.sleep(0.01)  # Let settings settle
 
