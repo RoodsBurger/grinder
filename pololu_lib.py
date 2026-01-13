@@ -51,7 +51,7 @@ class HighPowerStepperDriver:
             REG_BLANK:  0x080, # 2.56µs blank time
             REG_DECAY:  0x510, # Auto-Mixed decay (mode 5) for smooth operation
             REG_STALL:  0x040,
-            REG_DRIVE:  0x059, # IDRIVEP=50mA, IDRIVEN=100mA (TI recommended - was 0xA59=150/300mA)
+            REG_DRIVE:  0x559, # IDRIVEP=100mA, IDRIVEN=200mA (middle ground - was 0xA59=150/300mA)
         }
 
         # Track current step mode index (0-8) for RPM calculations
