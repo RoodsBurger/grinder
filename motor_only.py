@@ -25,17 +25,10 @@ import spidev
 import RPi.GPIO as GPIO
 import json
 
-# DRV8711 Register addresses
-REG_CTRL = 0x00
-REG_TORQUE = 0x01
-REG_OFF = 0x02
-REG_BLANK = 0x03
-REG_DECAY = 0x04
-REG_DRIVE = 0x05
-REG_STATUS = 0x06
-REG_STALL = 0x07
+# DRV8711 Registers
+REG_CTRL, REG_TORQUE, REG_OFF, REG_BLANK = 0x00, 0x01, 0x02, 0x03
+REG_DECAY, REG_DRIVE, REG_STATUS, REG_STALL = 0x04, 0x05, 0x06, 0x07
 
-# Global flag for graceful shutdown
 shutdown_requested = False
 
 def signal_handler(signum, frame):
@@ -44,75 +37,44 @@ def signal_handler(signum, frame):
     shutdown_requested = True
 
 
-# Hardware Pins
-SCS_PIN = 8
-DIR_PIN = 24
-STEP_PIN = 25
-SLEEP_PIN = 7
-LCD_CS_PIN = 22  # Must disable LCD to prevent SPI MISO conflicts
+# Hardware
+SCS_PIN, DIR_PIN, STEP_PIN, SLEEP_PIN, LCD_CS_PIN = 8, 24, 25, 7, 22
+SPI_BUS, SPI_DEVICE, SPI_SPEED = 0, 0, 500000
+spi, MOTOR_DIRECTION = None, 1
 
-# SPI Configuration
-SPI_BUS = 0
-SPI_DEVICE = 0
-SPI_SPEED = 500000  # 500kHz (matches Pololu Arduino library)
-spi = None
-
-# Motor Direction
-MOTOR_DIRECTION = 1
-
-# Configuration loading
 def load_motor_config(config_id='J6'):
-    """
-    Load motor configuration from motor_configs.json
-
-    Args:
-        config_id: Configuration ID (e.g., 'J6', 'K1', 'A3'). Defaults to 'J6'.
-
-    Returns:
-        Dictionary with motor configuration parameters
-    """
+    """Load motor configuration from motor_configs.json"""
     config_path = os.path.join(os.path.dirname(__file__), 'motor_configs.json')
 
     try:
         with open(config_path, 'r') as f:
             configs = json.load(f)
     except FileNotFoundError:
-        print(f"ERROR: motor_configs.json not found at {config_path}")
+        print(f"ERROR: motor_configs.json not found")
         sys.exit(1)
     except json.JSONDecodeError as e:
-        print(f"ERROR: Invalid JSON in motor_configs.json: {e}")
+        print(f"ERROR: Invalid JSON: {e}")
         sys.exit(1)
 
     if config_id not in configs:
-        print(f"ERROR: Configuration '{config_id}' not found in motor_configs.json")
-        print(f"Available configs: {', '.join(sorted(configs.keys()))}")
+        print(f"ERROR: Config '{config_id}' not found")
+        print(f"Available: {', '.join(sorted(configs.keys()))}")
         sys.exit(1)
 
     return configs[config_id]
 
-# Config will be loaded in run_motor() function based on command line args
-
 def calculate_torque_register(current_ma):
-    """
-    Calculate TORQUE register and ISGAIN bits for given current
-    Formula: TORQUE = (384 * I_TRQ * R_SENSE * 2) / V_REF
-    Returns: (torque_value, isgain_bits)
-    """
-    r_sense = 0.030  # 30mΩ sense resistors on Pololu 36v4
-
+    """Calculate TORQUE register and ISGAIN bits for given current"""
+    r_sense = 0.030
     gains = [(0, 3.3), (1, 1.65), (2, 0.825), (3, 0.4125)]
 
     for gain_bits, v_ref in gains:
         torque = int((384 * (current_ma / 1000.0) * r_sense * 2) / v_ref)
         if 0 <= torque <= 255:
-            print(f"    [*] Calculated: TORQUE=0x{torque:02X} ({torque}), ISGAIN={gain_bits} (Gain {[5,10,20,40][gain_bits]})")
+            print(f"    Calculated: TORQUE=0x{torque:02X}, ISGAIN={gain_bits}")
             return (torque, gain_bits)
 
-    raise ValueError(f"Current {current_ma}mA exceeds maximum supported")
-
-# ============================================================================
-# SPI LOW-LEVEL FUNCTIONS (from comprehensive test)
-# ============================================================================
+    raise ValueError(f"Current {current_ma}mA too high")
 
 def init_spi():
     """Initialize SPI bus"""
@@ -120,61 +82,47 @@ def init_spi():
     spi = spidev.SpiDev()
     spi.open(SPI_BUS, SPI_DEVICE)
     spi.max_speed_hz = SPI_SPEED
-    spi.mode = 0b00  # CPOL=0, CPHA=0
-    # CRITICAL: Disable kernel CS control to allow manual CS toggling (Pololu uses active-HIGH CS)
+    spi.mode = 0b00
     try:
-        spi.no_cs = True
+        spi.no_cs = True  # Manual CS control for Pololu
     except:
-        pass  # Some kernel versions don't support this
-    print(f"    [OK] SPI opened at {spi.max_speed_hz}Hz")
+        pass
+    print(f"    SPI opened at {spi.max_speed_hz}Hz")
 
 def close_spi():
-    """Close SPI bus"""
     global spi
     if spi:
         spi.close()
         spi = None
 
 def write_reg(reg: int, value: int):
-    """Write to DRV8711 register (12-bit value)"""
+    """Write to DRV8711 register"""
     if value < 0 or value > 0xFFF:
-        raise ValueError(f"Register value 0x{value:X} out of range [0x000-0xFFF]")
+        raise ValueError(f"Value 0x{value:X} out of range")
 
     msb = (reg << 4) | ((value >> 8) & 0x0F)
     lsb = value & 0xFF
-
-    GPIO.output(SCS_PIN, GPIO.HIGH)  # CS Active (HIGH for Pololu)
+    GPIO.output(SCS_PIN, GPIO.HIGH)
     spi.xfer2([msb, lsb])
-    GPIO.output(SCS_PIN, GPIO.LOW)  # CS Inactive (LOW)
-    time.sleep(0.0001)  # 100us settling time
-
-def read_reg(reg: int) -> int:
-    """Read from DRV8711 register (12-bit value)"""
-    read_cmd = 0x80 | (reg << 4)
-
-    GPIO.output(SCS_PIN, GPIO.HIGH)  # CS Active (HIGH for Pololu)
-    result = spi.xfer2([read_cmd, 0x00])
-    GPIO.output(SCS_PIN, GPIO.LOW)  # CS Inactive (LOW)
+    GPIO.output(SCS_PIN, GPIO.LOW)
     time.sleep(0.0001)
 
-    value = ((result[0] & 0x0F) << 8) | result[1]
-    return value
+def read_reg(reg: int) -> int:
+    """Read from DRV8711 register"""
+    read_cmd = 0x80 | (reg << 4)
+    GPIO.output(SCS_PIN, GPIO.HIGH)
+    result = spi.xfer2([read_cmd, 0x00])
+    GPIO.output(SCS_PIN, GPIO.LOW)
+    time.sleep(0.0001)
+    return ((result[0] & 0x0F) << 8) | result[1]
 
 def run_motor(target_rpm, config_id='J6'):
-    """
-    Run motor at target RPM until process is killed
-
-    Args:
-        target_rpm: Target speed in RPM (0-300)
-        config_id: Motor configuration ID from motor_configs.json (default: 'J6')
-    """
+    """Run motor at target RPM until process is killed"""
     global shutdown_requested, spi
 
-    # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    # Load motor configuration
     motor_config = load_motor_config(config_id)
 
     print(f"\n{'='*60}")

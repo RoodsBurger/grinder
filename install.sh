@@ -39,18 +39,10 @@ echo ""
 echo "[4/7] Copying files..."
 cp "$SCRIPT_DIR/motor_control.py" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/motor_only.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/motor_configs.json" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
-
-# Copy driver files from home directory
-for f in lcd_display.py touch_screen.py pololu_lib.py; do
-    if [ -f "$SCRIPT_DIR/$f" ]; then
-        cp "$SCRIPT_DIR/$f" "$INSTALL_DIR/"
-    elif [ -f "/home/step/$f" ]; then
-        cp "/home/step/$f" "$INSTALL_DIR/"
-    else
-        echo "WARNING: $f not found"
-    fi
-done
+cp "$SCRIPT_DIR/lcd_display.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/touch_screen.py" "$INSTALL_DIR/"
 
 chmod +x "$INSTALL_DIR"/*.py
 
