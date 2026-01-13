@@ -3,18 +3,18 @@
 Standalone motor control - runs in separate process
 No display, no touch - just motor operation
 
-MOTOR CONFIGURATION: Loaded from motor_configs.json (J6 config)
-J6 - Torque + Quiet Compromise v1:
-- Current: 5000mA (119% motor rated - from comprehensive testing)
-- Microstepping: 1/32 (very smooth)
-- PWM Frequency: 62.5kHz (0x020 - above audible)
-- Adaptive Blanking: ENABLED (for smooth 1/32 stepping)
-- Decay Mode: Slow/Mixed (0x110) - better torque, still quiet
-- Gate Drive: 200/400mA MAX (0xF59) - strong switching
-- SPI: 500kHz (matches Pololu Arduino library)
+MOTOR CONFIGURATION: Loaded from motor_configs.json
+- Defaults to J6 (Torque + Quiet Compromise v1) if no config specified
+- Can load any config by passing config ID as argument
 
-Test Results: Noise 6-7/10, Good torque at all speeds
-From 88-configuration comprehensive testing (2026-01-13)
+Usage:
+    python3 motor_only.py <RPM> [CONFIG_ID]
+
+Examples:
+    python3 motor_only.py 200          # Use J6 config at 200 RPM
+    python3 motor_only.py 200 K1       # Use K1 config at 200 RPM
+    python3 motor_only.py 100 A3       # Use A3 config at 100 RPM
+
 Reference: https://github.com/pololu/high-power-stepper-driver-arduino
 """
 import sys
@@ -60,18 +60,37 @@ spi = None
 # Motor Direction
 MOTOR_DIRECTION = 1
 
-# Load J6 Configuration from JSON file
-def load_j6_config():
-    """Load the optimal J6 configuration from motor_configs.json"""
-    config_path = os.path.join(os.path.dirname(__file__), 'motor_configs.json')
-    with open(config_path, 'r') as f:
-        configs = json.load(f)
-    return configs['J6']
+# Configuration loading
+def load_motor_config(config_id='J6'):
+    """
+    Load motor configuration from motor_configs.json
 
-# Load J6 config at startup
-J6_CONFIG = load_j6_config()
-J6_CURRENT_MA = J6_CONFIG['current_ma']
-J6_CTRL_BASE = J6_CONFIG['ctrl_base']
+    Args:
+        config_id: Configuration ID (e.g., 'J6', 'K1', 'A3'). Defaults to 'J6'.
+
+    Returns:
+        Dictionary with motor configuration parameters
+    """
+    config_path = os.path.join(os.path.dirname(__file__), 'motor_configs.json')
+
+    try:
+        with open(config_path, 'r') as f:
+            configs = json.load(f)
+    except FileNotFoundError:
+        print(f"ERROR: motor_configs.json not found at {config_path}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Invalid JSON in motor_configs.json: {e}")
+        sys.exit(1)
+
+    if config_id not in configs:
+        print(f"ERROR: Configuration '{config_id}' not found in motor_configs.json")
+        print(f"Available configs: {', '.join(sorted(configs.keys()))}")
+        sys.exit(1)
+
+    return configs[config_id]
+
+# Config will be loaded in run_motor() function based on command line args
 
 def calculate_torque_register(current_ma):
     """
@@ -141,16 +160,33 @@ def read_reg(reg: int) -> int:
     value = ((result[0] & 0x0F) << 8) | result[1]
     return value
 
-def run_motor(target_rpm):
-    """Run motor at target RPM until process is killed"""
+def run_motor(target_rpm, config_id='J6'):
+    """
+    Run motor at target RPM until process is killed
+
+    Args:
+        target_rpm: Target speed in RPM (0-300)
+        config_id: Motor configuration ID from motor_configs.json (default: 'J6')
+    """
     global shutdown_requested, spi
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
+    # Load motor configuration
+    motor_config = load_motor_config(config_id)
+
     print(f"\n{'='*60}")
-    print(f"  Motor Control Starting - Target: {target_rpm} RPM")
+    print(f"  Motor Control Starting")
+    print(f"  Config: {config_id} - {motor_config['name']}")
+    print(f"  Target: {target_rpm} RPM")
+    print(f"{'='*60}")
+    print(f"  Current: {motor_config['current_ma']}mA")
+    print(f"  PWM: {motor_config['pwm_freq_khz']}kHz")
+    print(f"  Decay: {motor_config['decay_name']}")
+    print(f"  Drive: {motor_config['drive_name']}")
+    print(f"  Microstepping: 1/{motor_config['microstep_divider']}")
     print(f"{'='*60}")
 
     # Initialize GPIO
@@ -192,12 +228,12 @@ def run_motor(target_rpm):
     print("[*] Initializing SPI at 500kHz...")
     init_spi()
 
-    # Calculate TORQUE and ISGAIN for J6 current (like comprehensive test)
-    print(f"[*] Calculating registers for {J6_CURRENT_MA}mA...")
-    torque_val, isgain_bits = calculate_torque_register(J6_CURRENT_MA)
+    # Calculate TORQUE and ISGAIN for motor current (like comprehensive test)
+    print(f"[*] Calculating registers for {motor_config['current_ma']}mA...")
+    torque_val, isgain_bits = calculate_torque_register(motor_config['current_ma'])
 
     # Build CTRL register (like comprehensive test)
-    ctrl = J6_CTRL_BASE
+    ctrl = motor_config['ctrl_base']
     ctrl = (ctrl & ~0x300) | (isgain_bits << 8)  # Set ISGAIN bits [9:8]
     ctrl = ctrl & ~0x01  # Ensure disabled initially
     print(f"    [*] CTRL register: 0x{ctrl:03X} (ENBL bit cleared)")
@@ -209,14 +245,14 @@ def run_motor(target_rpm):
 
     # CRITICAL: Write registers in EXACT order as comprehensive test
     # Write CTRL FIRST with disabled bit, then other registers
-    print("[*] Writing J6 configuration...")
-    write_reg(REG_CTRL, ctrl)                   # CTRL first (disabled, with calculated ISGAIN)
-    write_reg(REG_TORQUE, torque_val)           # Calculated torque value
-    write_reg(REG_OFF, J6_CONFIG['off'])        # 62.5kHz PWM
-    write_reg(REG_BLANK, J6_CONFIG['blank'])    # ABT enabled
-    write_reg(REG_DECAY, J6_CONFIG['decay'])    # Slow/Mixed
-    write_reg(REG_DRIVE, J6_CONFIG['drive'])    # 200/400mA MAX
-    write_reg(REG_STALL, J6_CONFIG['stall'])    # Stall detection
+    print(f"[*] Writing {config_id} configuration...")
+    write_reg(REG_CTRL, ctrl)                     # CTRL first (disabled, with calculated ISGAIN)
+    write_reg(REG_TORQUE, torque_val)             # Calculated torque value
+    write_reg(REG_OFF, motor_config['off'])       # PWM frequency
+    write_reg(REG_BLANK, motor_config['blank'])   # Blanking time / ABT
+    write_reg(REG_DECAY, motor_config['decay'])   # Decay mode
+    write_reg(REG_DRIVE, motor_config['drive'])   # Gate drive current
+    write_reg(REG_STALL, motor_config['stall'])   # Stall detection
     print("    [*] All registers written")
 
     # Clear faults (like comprehensive test)
@@ -240,16 +276,16 @@ def run_motor(target_rpm):
 
             print(f"    CTRL:   0x{ctrl_readback:03X} (expected 0x{ctrl:03X})")
             print(f"    TORQUE: 0x{torque_readback:03X} (expected 0x{torque_val:03X})")
-            print(f"    OFF:    0x{off_readback:03X} (expected 0x{J6_CONFIG['off']:03X})")
-            print(f"    DECAY:  0x{decay_readback:03X} (expected 0x{J6_CONFIG['decay']:03X})")
-            print(f"    DRIVE:  0x{drive_readback:03X} (expected 0x{J6_CONFIG['drive']:03X})")
+            print(f"    OFF:    0x{off_readback:03X} (expected 0x{motor_config['off']:03X})")
+            print(f"    DECAY:  0x{decay_readback:03X} (expected 0x{motor_config['decay']:03X})")
+            print(f"    DRIVE:  0x{drive_readback:03X} (expected 0x{motor_config['drive']:03X})")
 
             if (ctrl_readback == ctrl and
                 torque_readback == torque_val and
-                off_readback == J6_CONFIG['off'] and
-                decay_readback == J6_CONFIG['decay'] and
-                drive_readback == J6_CONFIG['drive']):
-                print("    [OK] All J6 registers verified")
+                off_readback == motor_config['off'] and
+                decay_readback == motor_config['decay'] and
+                drive_readback == motor_config['drive']):
+                print(f"    [OK] All {config_id} registers verified")
             else:
                 print("    [!] WARNING: Register mismatch - continuing anyway")
     except Exception as e:
@@ -268,9 +304,9 @@ def run_motor(target_rpm):
     print("[*] SPI closed, entering high-speed stepping loop...")
     print("[*] Press Ctrl+C to stop\n")
 
-    # Calculate delays (using J6 microstepping)
+    # Calculate delays (using config microstepping)
     steps_rev = 200
-    microsteps = J6_CONFIG['microstep_divider']
+    microsteps = motor_config['microstep_divider']
     steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
@@ -302,17 +338,32 @@ def run_motor(target_rpm):
         print("[*] Motor stopped")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: motor_only.py <RPM>")
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
+        print("Usage: motor_only.py <RPM> [CONFIG_ID]")
+        print("")
+        print("Arguments:")
+        print("  RPM        - Target speed (0-300)")
+        print("  CONFIG_ID  - Motor configuration ID (default: J6)")
+        print("")
+        print("Examples:")
+        print("  python3 motor_only.py 200       # Use J6 config at 200 RPM")
+        print("  python3 motor_only.py 200 K1    # Use K1 config at 200 RPM")
+        print("  python3 motor_only.py 100 A3    # Use A3 config at 100 RPM")
         sys.exit(1)
 
     try:
+        # Parse RPM
         rpm = int(sys.argv[1])
         if rpm < 0 or rpm > 300:
-            print("RPM must be 0-300")
+            print("ERROR: RPM must be 0-300")
             sys.exit(1)
 
-        run_motor(rpm)
+        # Parse optional config ID (default to J6)
+        config_id = sys.argv[2] if len(sys.argv) == 3 else 'J6'
+
+        # Run motor with specified config
+        run_motor(rpm, config_id)
+
     except ValueError:
-        print("Invalid RPM value")
+        print("ERROR: Invalid RPM value (must be integer)")
         sys.exit(1)
