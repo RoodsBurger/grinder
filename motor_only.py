@@ -81,6 +81,11 @@ def init_spi():
     spi.open(SPI_BUS, SPI_DEVICE)
     spi.max_speed_hz = SPI_SPEED
     spi.mode = 0b00  # CPOL=0, CPHA=0
+    # CRITICAL: Disable kernel CS control to allow manual CS toggling (Pololu uses active-HIGH CS)
+    try:
+        spi.no_cs = True
+    except:
+        pass  # Some kernel versions don't support this
     print(f"    [OK] SPI opened at {spi.max_speed_hz}Hz")
 
 def close_spi():

@@ -53,6 +53,11 @@ def init_spi():
     spi.open(SPI_BUS, SPI_DEVICE)
     spi.max_speed_hz = SPI_SPEED
     spi.mode = 0b00
+    # CRITICAL: Disable kernel CS control for manual CS toggling
+    try:
+        spi.no_cs = True
+    except:
+        pass
     print(f"[OK] SPI opened at {spi.max_speed_hz}Hz")
 
 def close_spi():
