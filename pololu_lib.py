@@ -84,7 +84,7 @@ class HighPowerStepperDriver:
 
         if self.cs_pin:
             GPIO.setup(self.cs_pin, GPIO.OUT)
-            GPIO.output(self.cs_pin, GPIO.HIGH) # Default High (Inactive - CS is active LOW)
+            GPIO.output(self.cs_pin, GPIO.LOW) # Default Low (Inactive for Pololu active-HIGH CS)
 
     def _setup_spi(self):
         self.spi = spidev.SpiDev()
@@ -107,15 +107,13 @@ class HighPowerStepperDriver:
         cmd_msb = ((address & 0x07) << 4) | ((value >> 8) & 0x0F)
         cmd_lsb = value & 0xFF
 
-        if self.cs_pin: GPIO.output(self.cs_pin, GPIO.LOW) # CS Active (LOW for DRV8711)
-        time.sleep(0.000001)  # 1us setup time
+        if self.cs_pin: GPIO.output(self.cs_pin, GPIO.HIGH) # CS Active (HIGH for Pololu)
         try:
             self.spi.xfer2([cmd_msb, cmd_lsb])
         except Exception as e:
             raise IOError(f"SPI write failed: {e}")
         finally:
-            time.sleep(0.000001)  # 1us hold time
-            if self.cs_pin: GPIO.output(self.cs_pin, GPIO.HIGH) # CS Inactive (HIGH)
+            if self.cs_pin: GPIO.output(self.cs_pin, GPIO.LOW) # CS Inactive (LOW)
 
     def _read_reg(self, address):
         """Read from DRV8711 register with error handling."""
@@ -123,15 +121,13 @@ class HighPowerStepperDriver:
             raise ValueError(f"Invalid register address: {address}")
 
         cmd_msb = (1 << 7) | ((address & 0x07) << 4)
-        if self.cs_pin: GPIO.output(self.cs_pin, GPIO.LOW) # CS Active (LOW for DRV8711)
-        time.sleep(0.000001)  # 1us setup time
+        if self.cs_pin: GPIO.output(self.cs_pin, GPIO.HIGH) # CS Active (HIGH for Pololu)
         try:
             result = self.spi.xfer2([cmd_msb, 0x00])
         except Exception as e:
             raise IOError(f"SPI read failed: {e}")
         finally:
-            time.sleep(0.000001)  # 1us hold time
-            if self.cs_pin: GPIO.output(self.cs_pin, GPIO.HIGH) # CS Inactive (HIGH)
+            if self.cs_pin: GPIO.output(self.cs_pin, GPIO.LOW) # CS Inactive (LOW)
         return ((result[0] & 0x0F) << 8) | result[1]
 
     def apply_settings(self):
