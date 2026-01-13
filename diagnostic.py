@@ -143,19 +143,20 @@ def test_motor_movement():
     """Test motor with J6 configuration"""
     print_header("TEST 3: MOTOR MOVEMENT (J6 Config)")
 
+    # Wake up driver (after SPI init - matches comprehensive test)
     print("[*] Waking up driver...")
     GPIO.output(SLEEP_PIN, GPIO.HIGH)
     time.sleep(0.001)
 
-    # Write J6 configuration
+    # Write J6 configuration - CTRL FIRST (matches comprehensive test order)
     print("[*] Writing J6 registers...")
+    write_reg(REG_CTRL, J6_CONFIG['ctrl'])      # CTRL first (disabled)
     write_reg(REG_TORQUE, J6_CONFIG['torque'])
     write_reg(REG_OFF, J6_CONFIG['off'])
     write_reg(REG_BLANK, J6_CONFIG['blank'])
     write_reg(REG_DECAY, J6_CONFIG['decay'])
     write_reg(REG_DRIVE, J6_CONFIG['drive'])
     write_reg(REG_STALL, J6_CONFIG['stall'])
-    write_reg(REG_CTRL, J6_CONFIG['ctrl'])
 
     # Clear faults
     print("[*] Clearing faults...")
