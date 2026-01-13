@@ -43,15 +43,16 @@ class HighPowerStepperDriver:
         self.reset_pin = reset_pin
         self.cs_pin = cs_pin
 
-        # Default Register Values (Based on Pololu official library + noise optimizations)
+        # Default Register Values (Pololu official library defaults)
+        # Reference: https://github.com/pololu/high-power-stepper-driver-arduino
         self.regs = {
-            REG_CTRL:   0xC10, # Gain 5, 1/4 Step
-            REG_TORQUE: 0x1FF,
-            REG_OFF:    0x030, # 24µs = 41.7kHz PWM (above audible, Pololu default)
+            REG_CTRL:   0xC10, # Gain 5, 1/4 Step, disabled
+            REG_TORQUE: 0x1FF, # Default torque (will be recalculated by set_current)
+            REG_OFF:    0x030, # 24µs = 41.7kHz PWM (ABOVE AUDIBLE!)
             REG_BLANK:  0x080, # 2.56µs blank time
-            REG_DECAY:  0x510, # Auto-Mixed decay (TI recommended, used in Pololu examples)
-            REG_STALL:  0x040,
-            REG_DRIVE:  0x559, # IDRIVEP=100mA, IDRIVEN=200mA (reduced from Pololu 0xA59 for less noise)
+            REG_DECAY:  0x510, # Auto-Mixed (Pololu examples recommend this over 0x110)
+            REG_STALL:  0x040, # Default stall detection
+            REG_DRIVE:  0xA59, # IDRIVEP=150mA, IDRIVEN=300mA (Pololu default)
         }
 
         # Track current step mode index (0-8) for RPM calculations
@@ -128,44 +129,82 @@ class HighPowerStepperDriver:
             if self.cs_pin: GPIO.output(self.cs_pin, GPIO.LOW)
         return ((result[0] & 0x0F) << 8) | result[1]
 
+    def apply_settings(self):
+        """
+        Writes all cached register values to the driver.
+        Order matches Pololu library: TORQUE, OFF, BLANK, DECAY, DRIVE, STALL, CTRL last.
+        CTRL is written last because it contains the ENBL bit.
+        """
+        self._write_reg(REG_TORQUE, self.regs[REG_TORQUE])
+        self._write_reg(REG_OFF, self.regs[REG_OFF])
+        self._write_reg(REG_BLANK, self.regs[REG_BLANK])
+        self._write_reg(REG_DECAY, self.regs[REG_DECAY])
+        self._write_reg(REG_DRIVE, self.regs[REG_DRIVE])
+        self._write_reg(REG_STALL, self.regs[REG_STALL])
+        self._write_reg(REG_CTRL, self.regs[REG_CTRL])
+
     def reset_settings(self):
-        """Resets driver to safe defaults."""
+        """
+        Resets all registers to power-on defaults.
+        Matches Pololu HighPowerStepperDriver::resetSettings()
+        """
         if self.reset_pin:
             GPIO.output(self.reset_pin, GPIO.HIGH)
             time.sleep(0.001)
             GPIO.output(self.reset_pin, GPIO.LOW)
 
-        # Reload defaults
-        for reg, val in self.regs.items():
-            if reg != REG_STATUS: # Don't write to status
-                self._write_reg(reg, val)
-        self.step_mode_val = 2 # Reset tracker to 1/4 step
+        # Restore default values
+        self.regs[REG_CTRL]   = 0xC10
+        self.regs[REG_TORQUE] = 0x1FF
+        self.regs[REG_OFF]    = 0x030
+        self.regs[REG_BLANK]  = 0x080
+        self.regs[REG_DECAY]  = 0x510  # Using AutoMixed (Pololu examples recommend)
+        self.regs[REG_STALL]  = 0x040
+        self.regs[REG_DRIVE]  = 0xA59
+
+        self.step_mode_val = 2  # Track 1/4 step default
+        self.apply_settings()  # Write to hardware
 
     def set_current_milliamps(self, current_ma):
-        """Sets current limit based on 36v4 30mOhm resistors."""
+        """
+        Sets current limit for 36v4 board (30mOhm sense resistors).
+        Uses Pololu's exact formula from official library.
+        Reference: HighPowerStepperDriver::setCurrentMilliamps36v4()
+        """
         if current_ma < 0 or current_ma > 8000:
             raise ValueError(f"Current {current_ma}mA out of range (0-8000mA)")
 
-        r_sense = 0.030
-        gains = [(5, 0), (10, 1), (20, 2), (40, 3)]
+        # Pololu 36v4 formula: delegate to 36v8 with doubled current
+        # This accounts for different sense resistor configuration
+        current_doubled = current_ma * 2
+        if current_doubled > 16000:
+            current_doubled = 16000
 
-        best_gain, best_gain_bits, best_torque = 5, 0, 0
+        # Calculate TORQUE and ISGAIN using Pololu formula
+        # Formula: torqueBits = (384 * current_doubled) / 6875
+        isgain_bits = 0b11  # Start with gain 40 (bits = 3)
+        torque_bits = (384 * current_doubled) // 6875
 
-        for g, bits in gains:
-            max_current = (2.75 * 255) / (256 * g * r_sense)
-            if max_current >= (current_ma / 1000.0):
-                torque_val = int(((current_ma / 1000.0) * 256 * g * r_sense) / 2.75)
-                if torque_val > 255: torque_val = 255
-                best_gain, best_gain_bits, best_torque = g, bits, torque_val
+        # Reduce gain if TORQUE overflows 8 bits
+        while torque_bits > 0xFF:
+            isgain_bits -= 1
+            torque_bits >>= 1
 
-        # Apply Gain
-        ctrl_val = self.regs[REG_CTRL] & ~(0x3 << 8)
-        self._write_reg(REG_CTRL, ctrl_val | (best_gain_bits << 8))
+        # Map ISGAIN bits to gain values for logging
+        gain_map = {0: 5, 1: 10, 2: 20, 3: 40}
+        gain_value = gain_map.get(isgain_bits, 5)
 
-        # Apply Torque
-        torque_reg_val = (self.regs[REG_TORQUE] & ~0xFF) | best_torque
-        self._write_reg(REG_TORQUE, torque_reg_val)
-        print(f"Driver Configured: {current_ma}mA (Gain: {best_gain}, Torque: {best_torque})")
+        # Update CTRL register (bits 9:8 = ISGAIN)
+        ctrl_val = self.regs[REG_CTRL] & 0b110011111111  # Clear bits 9:8
+        ctrl_val |= (isgain_bits << 8)
+        self._write_reg(REG_CTRL, ctrl_val)
+
+        # Update TORQUE register (bits 7:0 = TORQUE)
+        torque_val = self.regs[REG_TORQUE] & 0b111100000000  # Clear bits 7:0
+        torque_val |= torque_bits
+        self._write_reg(REG_TORQUE, torque_val)
+
+        print(f"Driver Configured: {current_ma}mA (Gain: {gain_value}, Torque: {torque_bits})")
 
     def set_step_mode(self, step_div):
         """

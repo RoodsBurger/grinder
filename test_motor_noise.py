@@ -17,73 +17,61 @@ SLEEP_PIN = 7
 # Test configurations organized by category
 TEST_CONFIGS = {
     # ========== BASELINE TESTS ==========
-    "baseline_old": {
-        "name": "BASELINE OLD (before DRIVE fix)",
+    "baseline_pololu": {
+        "name": "POLOLU EXACT DEFAULTS (from official library)",
+        "current": 4200,
+        "step_mode": 16,
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
+    },
+    "baseline_old_bad": {
+        "name": "OLD WRONG CONFIG (80µs OFF = 12.5kHz audible!)",
         "current": 4200,
         "step_mode": 16,
         "regs": {"CTRL": 0xC20, "OFF": 0x0A0, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
     },
-    "baseline_new": {
-        "name": "BASELINE NEW (with DRIVE fix)",
-        "current": 4200,
-        "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x0A0, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
-    },
 
     # ========== PWM FREQUENCY SWEEP (OFF register) ==========
     "pwm_20us": {
-        "name": "PWM: 20µs OFF (50 kHz - very high, above audible)",
+        "name": "PWM: 20µs OFF (50 kHz - very high)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x028, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x028, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
+    },
+    "pwm_24us_pololu": {
+        "name": "PWM: 24µs OFF (41.7 kHz - POLOLU DEFAULT)",
+        "current": 4200,
+        "step_mode": 16,
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
     },
     "pwm_30us": {
-        "name": "PWM: 30µs OFF (33 kHz - high, above audible)",
+        "name": "PWM: 30µs OFF (33 kHz)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x03C, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x03C, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
     },
     "pwm_40us": {
-        "name": "PWM: 40µs OFF (25 kHz - above audible)",
+        "name": "PWM: 40µs OFF (25 kHz)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
+    },
+    "pwm_50us": {
+        "name": "PWM: 50µs OFF (20 kHz - near audible threshold)",
+        "current": 4200,
+        "step_mode": 16,
+        "regs": {"CTRL": 0xC20, "OFF": 0x064, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
     },
     "pwm_60us": {
         "name": "PWM: 60µs OFF (16.7 kHz - borderline audible)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x078, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x078, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
     },
-    "pwm_80us": {
-        "name": "PWM: 80µs OFF (12.5 kHz - AUDIBLE current default)",
+    "pwm_80us_bad": {
+        "name": "PWM: 80µs OFF (12.5 kHz - AUDIBLE, avoid!)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x0A0, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
-    },
-    "pwm_120us": {
-        "name": "PWM: 120µs OFF (8.3 kHz - audible)",
-        "current": 4200,
-        "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x0F0, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
-    },
-    "pwm_160us": {
-        "name": "PWM: 160µs OFF (6.25 kHz - lower audible)",
-        "current": 4200,
-        "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x140, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
-    },
-    "pwm_200us": {
-        "name": "PWM: 200µs OFF (5 kHz - low audible)",
-        "current": 4200,
-        "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x190, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
-    },
-    "pwm_250us": {
-        "name": "PWM: 250µs OFF (4 kHz - very low)",
-        "current": 4200,
-        "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x1F4, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x0A0, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
     },
 
     # ========== BLANKING TIME SWEEP (BLANK register) ==========
@@ -91,63 +79,63 @@ TEST_CONFIGS = {
         "name": "BLANK: 0.5µs (minimal blanking)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x019, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x019, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "blank_1us": {
         "name": "BLANK: 1.0µs (short blanking)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x032, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x032, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "blank_2p5us": {
         "name": "BLANK: 2.56µs (default)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "blank_3us": {
         "name": "BLANK: 3.0µs (medium blanking)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x096, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x096, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "blank_5us": {
         "name": "BLANK: 5.0µs (longer blanking)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x0FA, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x0FA, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "blank_abt": {
         "name": "BLANK: ABT Enabled (adaptive blanking)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
     },
 
     # ========== DRIVE CURRENT SWEEP (DRIVE register) ==========
     "drive_min": {
-        "name": "DRIVE: Minimum (50mA / 100mA - may not work)",
+        "name": "DRIVE: Minimum (50mA / 100mA - too weak!)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x059}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x059}
     },
     "drive_low": {
-        "name": "DRIVE: Low (100mA / 200mA - middle ground)",
+        "name": "DRIVE: Low (100mA / 200mA - quieter)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
-    "drive_med": {
-        "name": "DRIVE: Medium (150mA / 300mA - original default)",
+    "drive_med_pololu": {
+        "name": "DRIVE: Medium (150mA / 300mA - POLOLU DEFAULT)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xA59}
     },
     "drive_high": {
-        "name": "DRIVE: High (200mA / 400mA - max)",
+        "name": "DRIVE: High (200mA / 400mA - maximum)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xF59}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0xF59}
     },
 
     # ========== MICROSTEPPING SWEEP ==========
@@ -155,37 +143,37 @@ TEST_CONFIGS = {
         "name": "STEP: 1/4 (good torque, moderate noise)",
         "current": 4200,
         "step_mode": 4,
-        "regs": {"CTRL": 0xC10, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC10, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "step_8": {
         "name": "STEP: 1/8 (balanced)",
         "current": 4200,
         "step_mode": 8,
-        "regs": {"CTRL": 0xC18, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC18, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "step_16": {
         "name": "STEP: 1/16 (smooth, quiet)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "step_32": {
         "name": "STEP: 1/32 (very smooth, needs ABT)",
         "current": 4200,
         "step_mode": 32,
-        "regs": {"CTRL": 0xC28, "OFF": 0x050, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC28, "OFF": 0x030, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "step_64": {
         "name": "STEP: 1/64 (ultra smooth, reduced torque)",
         "current": 4200,
         "step_mode": 64,
-        "regs": {"CTRL": 0xC30, "OFF": 0x050, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC30, "OFF": 0x030, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "step_128": {
         "name": "STEP: 1/128 (max smoothness, low torque)",
         "current": 4200,
         "step_mode": 128,
-        "regs": {"CTRL": 0xC38, "OFF": 0x050, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC38, "OFF": 0x030, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
     },
 
     # ========== DECAY MODE SWEEP ==========
@@ -193,37 +181,37 @@ TEST_CONFIGS = {
         "name": "DECAY: Slow (smoothest, can distort)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x010, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x010, "DRIVE": 0x559}
     },
     "decay_slow_mixed": {
         "name": "DECAY: Slow/Mixed",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x110, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x110, "DRIVE": 0x559}
     },
     "decay_fast": {
         "name": "DECAY: Fast (fastest response, noisy)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x210, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x210, "DRIVE": 0x559}
     },
     "decay_mixed": {
         "name": "DECAY: Mixed (balanced)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x310, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x310, "DRIVE": 0x559}
     },
     "decay_slow_auto": {
         "name": "DECAY: Slow/Auto",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x410, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x410, "DRIVE": 0x559}
     },
     "decay_auto_mixed": {
         "name": "DECAY: Auto-Mixed (default, adaptive)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
 
     # ========== CURRENT VARIATIONS ==========
@@ -231,51 +219,45 @@ TEST_CONFIGS = {
         "name": "CURRENT: 3.4A (80% rated)",
         "current": 3400,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "current_3800": {
         "name": "CURRENT: 3.8A (90% rated)",
         "current": 3800,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "current_4200": {
         "name": "CURRENT: 4.2A (100% rated)",
         "current": 4200,
         "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC20, "OFF": 0x030, "BLANK": 0x080, "DECAY": 0x510, "DRIVE": 0x559}
     },
 
     # ========== OPTIMIZED COMBINATIONS ==========
-    "combo_silent_high_freq": {
-        "name": "COMBO: Silent (high PWM freq approach)",
+    "combo_pololu_32step": {
+        "name": "COMBO: Pololu + 32step + ABT (recommended)",
+        "current": 4200,
+        "step_mode": 32,
+        "regs": {"CTRL": 0xC28, "OFF": 0x030, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0xA59}
+    },
+    "combo_quiet_drive": {
+        "name": "COMBO: Pololu + lower DRIVE (quieter)",
         "current": 4200,
         "step_mode": 32,
         "regs": {"CTRL": 0xC28, "OFF": 0x030, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
     },
-    "combo_silent_low_freq": {
-        "name": "COMBO: Silent (low PWM freq approach)",
+    "combo_even_higher_pwm": {
+        "name": "COMBO: Even higher PWM (20µs = 50kHz)",
         "current": 4200,
         "step_mode": 32,
-        "regs": {"CTRL": 0xC28, "OFF": 0x1F4, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
-    },
-    "combo_balanced": {
-        "name": "COMBO: Balanced (16step + medium PWM)",
-        "current": 4200,
-        "step_mode": 16,
-        "regs": {"CTRL": 0xC20, "OFF": 0x050, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
-    },
-    "combo_torque": {
-        "name": "COMBO: Max Torque (8step + high current)",
-        "current": 4200,
-        "step_mode": 8,
-        "regs": {"CTRL": 0xC18, "OFF": 0x050, "BLANK": 0x080, "DECAY": 0x310, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC28, "OFF": 0x028, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
     },
     "combo_ultra_quiet": {
-        "name": "COMBO: Ultra Quiet (128step + low current)",
+        "name": "COMBO: Ultra quiet (128step + low current + low DRIVE)",
         "current": 3400,
         "step_mode": 128,
-        "regs": {"CTRL": 0xC38, "OFF": 0x030, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
+        "regs": {"CTRL": 0xC38, "OFF": 0x028, "BLANK": 0x180, "DECAY": 0x510, "DRIVE": 0x559}
     },
 }
 
@@ -471,10 +453,11 @@ def main():
 
         print(f"\n{'='*70}")
         print("\nRecommended testing sequence:")
-        print("  1. baseline_new (verify DRIVE fix)")
-        print("  2. combo_balanced (good starting point)")
-        print("  3. combo_silent_high_freq OR combo_silent_low_freq")
-        print("  4. Experiment with individual parameters based on results")
+        print("  1. baseline_pololu (verify Pololu exact defaults)")
+        print("  2. combo_pololu_32step (Pololu + smoother microstepping)")
+        print("  3. combo_quiet_drive (if still too loud, try lower DRIVE)")
+        print("  4. combo_even_higher_pwm (if still audible, go to 50kHz)")
+        print("\nThen experiment with Category 4 (DRIVE) to find quietest level")
 
         print(f"\n{'='*70}")
         choice = input("\nRun [A]ll tests, [C]ategory, [S]pecific test, or [Q]uick recommended? (A/C/S/Q): ").strip().upper()
@@ -527,7 +510,7 @@ def main():
 
         elif choice == 'Q':
             # Quick recommended sequence
-            recommended = ["baseline_new", "combo_balanced", "combo_silent_high_freq", "combo_silent_low_freq"]
+            recommended = ["baseline_pololu", "combo_pololu_32step", "combo_quiet_drive", "combo_even_higher_pwm"]
             for test_id in recommended:
                 run_test(TEST_CONFIGS[test_id], rpm, duration)
                 input("\nPress ENTER for next test (Ctrl+C to stop)...")
