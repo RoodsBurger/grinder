@@ -211,18 +211,18 @@ def write_reg(reg: int, value: int):
     msb = (reg << 4) | ((value >> 8) & 0x0F)
     lsb = value & 0xFF
 
-    GPIO.output(CS_PIN, GPIO.LOW)
+    GPIO.output(CS_PIN, GPIO.HIGH)  # CS Active (HIGH for Pololu)
     spi.xfer2([msb, lsb])
-    GPIO.output(CS_PIN, GPIO.HIGH)
+    GPIO.output(CS_PIN, GPIO.LOW)  # CS Inactive (LOW)
     time.sleep(0.0001)  # 100us settling time
 
 def read_reg(reg: int) -> int:
     """Read from DRV8711 register (12-bit value)"""
     read_cmd = 0x80 | (reg << 4)
 
-    GPIO.output(CS_PIN, GPIO.LOW)
+    GPIO.output(CS_PIN, GPIO.HIGH)  # CS Active (HIGH for Pololu)
     result = spi.xfer2([read_cmd, 0x00])
-    GPIO.output(CS_PIN, GPIO.HIGH)
+    GPIO.output(CS_PIN, GPIO.LOW)  # CS Inactive (LOW)
     time.sleep(0.0001)
 
     value = ((result[0] & 0x0F) << 8) | result[1]
@@ -247,7 +247,7 @@ def init_gpio():
     GPIO.setup(DIR_PIN, GPIO.OUT)
     GPIO.setup(SLEEP_PIN, GPIO.OUT)
 
-    GPIO.output(CS_PIN, GPIO.HIGH)
+    GPIO.output(CS_PIN, GPIO.LOW)  # CS inactive (LOW for Pololu active-HIGH)
     GPIO.output(STEP_PIN, GPIO.LOW)
     GPIO.output(DIR_PIN, GPIO.LOW)
     GPIO.output(SLEEP_PIN, GPIO.LOW)
