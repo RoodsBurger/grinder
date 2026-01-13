@@ -69,6 +69,8 @@ echo ""
 echo "[7/7] Starting services..."
 systemctl start wifi-setup.service
 systemctl start motor-control.service
+# sudo systemctl stop motor-control.service
+
 
 echo ""
 echo "=========================================="

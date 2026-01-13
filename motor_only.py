@@ -59,9 +59,9 @@ spi = None
 MOTOR_DIRECTION = 1
 
 # J6 Configuration (from comprehensive test)
+J6_CURRENT_MA = 5000  # Target current in mA
+J6_CTRL_BASE = 0xC28  # 1/32 step, Gain will be calculated
 J6_CONFIG = {
-    'ctrl': 0xC28,      # Gain 5, 1/32 step, disabled
-    'torque': 0x18B,    # 5000mA (calculated for Gain 5)
     'off': 0x020,       # 62.5kHz PWM
     'blank': 0x180,     # ABT enabled
     'decay': 0x110,     # Slow/Mixed decay
@@ -69,6 +69,24 @@ J6_CONFIG = {
     'stall': 0x040,     # Stall detection
     'microstep': 32     # 1/32 microstepping
 }
+
+def calculate_torque_register(current_ma):
+    """
+    Calculate TORQUE register and ISGAIN bits for given current
+    Formula: TORQUE = (384 * I_TRQ * R_SENSE * 2) / V_REF
+    Returns: (torque_value, isgain_bits)
+    """
+    r_sense = 0.030  # 30mΩ sense resistors on Pololu 36v4
+
+    gains = [(0, 3.3), (1, 1.65), (2, 0.825), (3, 0.4125)]
+
+    for gain_bits, v_ref in gains:
+        torque = int((384 * (current_ma / 1000.0) * r_sense * 2) / v_ref)
+        if 0 <= torque <= 255:
+            print(f"    [*] Calculated: TORQUE=0x{torque:02X} ({torque}), ISGAIN={gain_bits} (Gain {[5,10,20,40][gain_bits]})")
+            return (torque, gain_bits)
+
+    raise ValueError(f"Current {current_ma}mA exceeds maximum supported")
 
 # ============================================================================
 # SPI LOW-LEVEL FUNCTIONS (from comprehensive test)
@@ -171,6 +189,16 @@ def run_motor(target_rpm):
     print("[*] Initializing SPI at 500kHz...")
     init_spi()
 
+    # Calculate TORQUE and ISGAIN for J6 current (like comprehensive test)
+    print(f"[*] Calculating registers for {J6_CURRENT_MA}mA...")
+    torque_val, isgain_bits = calculate_torque_register(J6_CURRENT_MA)
+
+    # Build CTRL register (like comprehensive test)
+    ctrl = J6_CTRL_BASE
+    ctrl = (ctrl & ~0x300) | (isgain_bits << 8)  # Set ISGAIN bits [9:8]
+    ctrl = ctrl & ~0x01  # Ensure disabled initially
+    print(f"    [*] CTRL register: 0x{ctrl:03X} (ENBL bit cleared)")
+
     # CRITICAL: Wake up driver AFTER SPI init (matches comprehensive test exactly)
     print("[*] Waking up driver...")
     GPIO.output(SLEEP_PIN, GPIO.HIGH)
@@ -179,18 +207,20 @@ def run_motor(target_rpm):
     # CRITICAL: Write registers in EXACT order as comprehensive test
     # Write CTRL FIRST with disabled bit, then other registers
     print("[*] Writing J6 configuration...")
-    write_reg(REG_CTRL, J6_CONFIG['ctrl'])      # CTRL first (disabled)
-    write_reg(REG_TORQUE, J6_CONFIG['torque'])  # 5000mA
+    write_reg(REG_CTRL, ctrl)                   # CTRL first (disabled, with calculated ISGAIN)
+    write_reg(REG_TORQUE, torque_val)           # Calculated torque value
     write_reg(REG_OFF, J6_CONFIG['off'])        # 62.5kHz PWM
     write_reg(REG_BLANK, J6_CONFIG['blank'])    # ABT enabled
     write_reg(REG_DECAY, J6_CONFIG['decay'])    # Slow/Mixed
     write_reg(REG_DRIVE, J6_CONFIG['drive'])    # 200/400mA MAX
     write_reg(REG_STALL, J6_CONFIG['stall'])    # Stall detection
+    print("    [*] All registers written")
 
     # Clear faults (like comprehensive test)
     print("[*] Clearing faults...")
     write_reg(REG_STATUS, 0x000)
     time.sleep(0.01)
+    print("    [*] Faults cleared")
 
     # Verify configuration by reading registers (OPTIONAL - works in BLIND mode if MISO broken)
     print("[*] Verifying configuration...")
@@ -205,12 +235,14 @@ def run_motor(target_rpm):
             decay_readback = read_reg(REG_DECAY)
             drive_readback = read_reg(REG_DRIVE)
 
-            print(f"    CTRL:   0x{ctrl_readback:03X} (expected 0x{J6_CONFIG['ctrl']:03X})")
+            print(f"    CTRL:   0x{ctrl_readback:03X} (expected 0x{ctrl:03X})")
+            print(f"    TORQUE: 0x{torque_readback:03X} (expected 0x{torque_val:03X})")
             print(f"    OFF:    0x{off_readback:03X} (expected 0x{J6_CONFIG['off']:03X})")
             print(f"    DECAY:  0x{decay_readback:03X} (expected 0x{J6_CONFIG['decay']:03X})")
             print(f"    DRIVE:  0x{drive_readback:03X} (expected 0x{J6_CONFIG['drive']:03X})")
 
-            if (ctrl_readback == J6_CONFIG['ctrl'] and
+            if (ctrl_readback == ctrl and
+                torque_readback == torque_val and
                 off_readback == J6_CONFIG['off'] and
                 decay_readback == J6_CONFIG['decay'] and
                 drive_readback == J6_CONFIG['drive']):
@@ -224,7 +256,7 @@ def run_motor(target_rpm):
     # Set direction and enable driver (set ENBL bit in CTRL)
     print(f"\n[*] Enabling driver and starting motor at {target_rpm} RPM...")
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
-    ctrl_enabled = J6_CONFIG['ctrl'] | 0x01  # Set ENBL bit
+    ctrl_enabled = ctrl | 0x01  # Set ENBL bit (use calculated ctrl value)
     write_reg(REG_CTRL, ctrl_enabled)
     time.sleep(0.001)
 
