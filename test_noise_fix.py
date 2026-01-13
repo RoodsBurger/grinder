@@ -2,6 +2,7 @@
 """
 Noise Fix Testing - Based on old quiet configuration + research
 Tests combinations to find quietest settings
+Using 6500mA motor current (100% of max rated current)
 """
 import RPi.GPIO as GPIO
 import spidev
@@ -14,6 +15,18 @@ STEP_PIN = 25
 DIR_PIN = 24
 SLEEP_PIN = 7
 LCD_CS_PIN = 22  # Disable LCD to prevent SPI interference
+
+# --- CURRENT CALCULATION ---
+# Target: 6500mA on 36v4 board
+# Formula: current_doubled = 6500 * 2 = 13000
+#          torque_bits = (384 * 13000) // 6875 = 726
+#          726 > 255, so reduce gain:
+#          ISGAIN = 1 (Gain 10), TORQUE = 181 (0xB5)
+# CTRL with ISGAIN=01, 1/32 step: 0x428
+# TORQUE with value 0xB5: 0x1B5
+CURRENT_MA = 6500
+TORQUE_VAL = 0x1B5  # 181 at Gain 10
+CTRL_BASE = 0x428   # ISGAIN=01 (Gain 10), 1/32 step, disabled
 
 # --- SETUP ---
 GPIO.setmode(GPIO.BCM)
@@ -43,6 +56,13 @@ def write_reg(address, value):
     GPIO.output(CS_PIN, GPIO.LOW)
     time.sleep(0.001)  # Small delay after write
 
+def disable_driver():
+    """Fully disable driver - no torque, no holding"""
+    print("[*] Disabling driver...")
+    write_reg(0x00, CTRL_BASE & ~0x01)  # Clear ENBL bit
+    GPIO.output(SLEEP_PIN, GPIO.LOW)     # Sleep mode
+    time.sleep(0.1)
+
 def print_config(name, config):
     print(f"\n{'='*60}")
     print(f"  CONFIG: {name}")
@@ -57,21 +77,21 @@ def print_config(name, config):
 configs = {
     # ========== BASELINE: OLD WORKING CONFIG ==========
     "1_OLD_QUIET": {
-        "description": "Original quiet config from optimized_versions",
-        "TORQUE": 0x0EA,  # 4200mA at Gain 20
-        "CTRL":   0xA28,  # Gain 20, 1/32 step
-        "OFF":    0x030,  # 41.7kHz PWM
-        "BLANK":  0x080,  # NO ABT (old setting)
-        "DECAY":  0x110,  # Slow/Mixed (old setting)
-        "DRIVE":  0xA59,  # 150/300mA
+        "description": f"Original quiet config @ {CURRENT_MA}mA",
+        "TORQUE": TORQUE_VAL,  # 6500mA at Gain 10
+        "CTRL":   CTRL_BASE,   # Gain 10, 1/32 step
+        "OFF":    0x030,       # 41.7kHz PWM
+        "BLANK":  0x080,       # NO ABT (old setting)
+        "DECAY":  0x110,       # Slow/Mixed (old setting)
+        "DRIVE":  0xA59,       # 150/300mA
         "STALL":  0x040,
     },
 
     # ========== HIGHER PWM FREQUENCY TESTS ==========
     "2_PWM_60KHZ": {
-        "description": "Increase PWM to 60kHz (OFF=0x020)",
-        "TORQUE": 0x0EA,
-        "CTRL":   0xA28,
+        "description": f"60kHz PWM @ {CURRENT_MA}mA",
+        "TORQUE": TORQUE_VAL,
+        "CTRL":   CTRL_BASE,
         "OFF":    0x020,  # 16µs = 62.5kHz (HIGHER than current!)
         "BLANK":  0x080,
         "DECAY":  0x110,
@@ -80,9 +100,9 @@ configs = {
     },
 
     "3_PWM_80KHZ": {
-        "description": "Increase PWM to 80kHz (OFF=0x018)",
-        "TORQUE": 0x0EA,
-        "CTRL":   0xA28,
+        "description": f"80kHz PWM @ {CURRENT_MA}mA",
+        "TORQUE": TORQUE_VAL,
+        "CTRL":   CTRL_BASE,
         "OFF":    0x018,  # 12µs = 83.3kHz (VERY HIGH!)
         "BLANK":  0x040,  # Shorter blank for higher freq
         "DECAY":  0x110,
@@ -92,9 +112,9 @@ configs = {
 
     # ========== DECAY MODE TESTS ==========
     "4_FAST_DECAY": {
-        "description": "Fast decay mode (may be quieter)",
-        "TORQUE": 0x0EA,
-        "CTRL":   0xA28,
+        "description": f"Fast decay @ {CURRENT_MA}mA",
+        "TORQUE": TORQUE_VAL,
+        "CTRL":   CTRL_BASE,
         "OFF":    0x030,
         "BLANK":  0x080,
         "DECAY":  0x210,  # Fast decay
@@ -103,9 +123,9 @@ configs = {
     },
 
     "5_SLOW_DECAY": {
-        "description": "Pure slow decay",
-        "TORQUE": 0x0EA,
-        "CTRL":   0xA28,
+        "description": f"Pure slow decay @ {CURRENT_MA}mA",
+        "TORQUE": TORQUE_VAL,
+        "CTRL":   CTRL_BASE,
         "OFF":    0x030,
         "BLANK":  0x080,
         "DECAY":  0x010,  # Slow decay
@@ -113,11 +133,11 @@ configs = {
         "STALL":  0x040,
     },
 
-    # ========== LOWER CURRENT TEST ==========
+    # ========== CURRENT REDUCTION TEST ==========
     "6_LOW_CURRENT": {
-        "description": "Reduce current to 2000mA (less vibration)",
-        "TORQUE": 0x070,  # 2000mA at Gain 20
-        "CTRL":   0xA28,
+        "description": "Reduce current to 4200mA (less vibration)",
+        "TORQUE": 0x16A,  # 4200mA at Gain 10 (torque=117)
+        "CTRL":   CTRL_BASE,
         "OFF":    0x030,
         "BLANK":  0x080,
         "DECAY":  0x110,
@@ -127,9 +147,9 @@ configs = {
 
     # ========== COMBINATION: OLD + HIGH PWM ==========
     "7_BEST_COMBO": {
-        "description": "Old decay + 60kHz PWM + reduced current",
-        "TORQUE": 0x0A0,  # 3000mA (middle ground)
-        "CTRL":   0xA28,
+        "description": "Old decay + 60kHz PWM + 5000mA",
+        "TORQUE": 0x18F,  # 5000mA at Gain 10 (torque=139)
+        "CTRL":   CTRL_BASE,
         "OFF":    0x020,  # 60kHz
         "BLANK":  0x080,  # Old setting
         "DECAY":  0x110,  # Old setting
@@ -190,7 +210,8 @@ def interactive_test():
     print("\n" + "="*60)
     print("  NOISE REDUCTION TEST - Interactive Mode")
     print("="*60)
-    print("\nThis will test 7 different configurations.")
+    print(f"\nTesting at {CURRENT_MA}mA motor current")
+    print("This will test 7 different configurations.")
     print("Listen carefully and rate each one.")
     print("\nPress ENTER to start...")
     input()
@@ -206,19 +227,20 @@ def interactive_test():
             setup_driver(config)
             run_test(rpm=150, duration=4)
 
+            # DISABLE DRIVER - no torque holding
+            disable_driver()
+
             # Get user feedback
             print("\n" + "-"*60)
             rating = input(f"Rate noise level (1=quietest, 10=loudest): ")
             notes = input("Notes (or press ENTER): ")
             results[name] = {"rating": rating, "notes": notes}
 
-            # Disable between tests
-            write_reg(0x00, config["CTRL"] & ~0x01)
-            GPIO.output(SLEEP_PIN, GPIO.LOW)
             time.sleep(1)
 
         except KeyboardInterrupt:
             print("\n\nTest interrupted!")
+            disable_driver()
             break
 
     # Summary
@@ -236,18 +258,25 @@ def main():
         else:
             # Quick test mode - just run config 1 (old quiet)
             print("\nQuick Test Mode - Running OLD_QUIET config")
+            print(f"Testing at {CURRENT_MA}mA motor current")
             print("For full interactive testing, run: sudo python3 test_noise_fix.py interactive\n")
             setup_driver(configs["1_OLD_QUIET"])
             run_test(rpm=150, duration=5)
 
+            # DISABLE DRIVER - no torque holding
+            disable_driver()
+            print("\n[OK] Test complete - driver disabled")
+
     except KeyboardInterrupt:
         print("\n\nStopped by user")
+        disable_driver()
     except Exception as e:
         print(f"\n\nERROR: {e}")
         import traceback
         traceback.print_exc()
+        disable_driver()
     finally:
-        # Cleanup
+        # Final cleanup
         GPIO.output(SLEEP_PIN, GPIO.LOW)
         GPIO.cleanup()
         spi.close()
