@@ -60,11 +60,6 @@ def run_motor(target_rpm):
     steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
     cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
 
-    # Acceleration profile (also used for deceleration) - 1 second ramp
-    accel_time = 1.0
-    accel_profile = driver.calculate_accel_profile(target_rpm, accel_time, steps_rev)
-    decel_profile = list(reversed(accel_profile))
-
     # Local optimizations
     step_pin = STEP_PIN
     gpio_out = GPIO.output
@@ -72,24 +67,9 @@ def run_motor(target_rpm):
     gpio_low = GPIO.LOW
 
     t_next = time.perf_counter()
-    step_count = 0
 
     try:
-        # Acceleration phase
-        for delay in accel_profile:
-            if shutdown_requested:
-                break
-
-            gpio_out(step_pin, gpio_high)
-            t_pulse = time.perf_counter()
-            while time.perf_counter() - t_pulse < 0.000002: pass
-            gpio_out(step_pin, gpio_low)
-
-            t_next += delay
-            while time.perf_counter() < t_next: pass
-            step_count += 1
-
-        # Cruise phase (until shutdown requested)
+        # Run at constant speed until shutdown requested (no acceleration/deceleration)
         while not shutdown_requested:
             gpio_out(step_pin, gpio_high)
             t_pulse = time.perf_counter()
@@ -98,19 +78,6 @@ def run_motor(target_rpm):
 
             t_next += cruise_delay
             while time.perf_counter() < t_next: pass
-            step_count += 1
-
-        # Deceleration phase (graceful shutdown)
-        if shutdown_requested:
-            for delay in decel_profile:
-                gpio_out(step_pin, gpio_high)
-                t_pulse = time.perf_counter()
-                while time.perf_counter() - t_pulse < 0.000002: pass
-                gpio_out(step_pin, gpio_low)
-
-                t_next += delay
-                while time.perf_counter() < t_next: pass
-                step_count += 1
 
     except KeyboardInterrupt:
         pass
