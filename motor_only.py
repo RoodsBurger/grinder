@@ -3,17 +3,17 @@
 Standalone motor control - runs in separate process
 No display, no touch - just motor operation
 
-MOTOR CONFIGURATION: J6 - Torque + Quiet Compromise v1 (from comprehensive testing)
-- Current: 5000mA (119% motor rated - optimal torque/noise balance)
+MOTOR CONFIGURATION: Pololu Library Defaults (SAFE - verified working)
+- Current: 4200mA (100% motor rated - safe)
 - Microstepping: 1/32 (very smooth)
-- PWM Frequency: 62.5kHz (above audible, quieter than 41.7kHz)
+- PWM Frequency: 41.7kHz (Pololu default)
 - Adaptive Blanking: ENABLED (for smooth 1/32 stepping)
-- Decay Mode: Slow/Mixed (0x110) - better torque than Auto-Mixed, quieter than Slow
-- Gate Drive: 200/400mA MAX (0xF59) - strong switching for reliability
+- Decay Mode: Auto-Mixed (0x510) - TI recommended
+- Gate Drive: 150/300mA (Pololu default)
 - SPI: 500kHz (matches Pololu Arduino library)
 
-Test Results: Noise 6-7/10, Excellent torque, No stalling at low speeds
-Based on 88-configuration comprehensive testing (2026-01-13)
+NOTE: Higher currents (5000mA+) cause hardware faults (BPDF, APDF, OTS)
+      indicating power supply or driver chip limits reached.
 Reference: https://github.com/pololu/high-power-stepper-driver-arduino
 """
 import sys
@@ -54,11 +54,11 @@ def verify_registers(driver):
         stall = driver._read_reg(REG_STALL)
 
         print(f"    CTRL   (0x00): 0x{ctrl:03X}   - Step mode, enable, gain")
-        print(f"    TORQUE (0x01): 0x{torque:03X}   - Current setting (5000mA)")
-        print(f"    OFF    (0x02): 0x{off:03X}   - PWM frequency (62.5kHz @ 0x020)")
+        print(f"    TORQUE (0x01): 0x{torque:03X}   - Current setting (4200mA)")
+        print(f"    OFF    (0x02): 0x{off:03X}   - PWM frequency (41.7kHz @ 0x030)")
         print(f"    BLANK  (0x03): 0x{blank:03X}   - Blanking time (ABT @ 0x180)")
-        print(f"    DECAY  (0x04): 0x{decay:03X}   - Decay mode (Slow/Mixed @ 0x110)")
-        print(f"    DRIVE  (0x05): 0x{drive:03X}   - Gate drive current (0xF59 = 200/400mA MAX)")
+        print(f"    DECAY  (0x04): 0x{decay:03X}   - Decay mode (Auto-Mixed @ 0x510)")
+        print(f"    DRIVE  (0x05): 0x{drive:03X}   - Gate drive current (150/300mA @ 0xA59)")
         print(f"    STALL  (0x07): 0x{stall:03X}   - Stall detection threshold")
 
         return True
@@ -151,49 +151,19 @@ def run_motor(target_rpm):
     # Verify SPI is at correct speed
     print(f"    [OK] SPI opened at {driver.spi.max_speed_hz}Hz")
 
-    # Configure driver with J6 optimized settings
-    print("[*] Configuring DRV8711 driver with J6 settings...")
+    # Configure driver with SAFE settings (same as diagnostic.py which works)
+    print("[*] Configuring DRV8711 driver with safe settings...")
     driver.reset_settings()
-    driver.set_current_milliamps(5000)  # 119% rated - optimal torque/noise balance
-    driver.set_step_mode(32)  # 1/32 microstepping for smoothest, quietest operation
+    driver.set_current_milliamps(4200)  # 100% motor rated - safe starting point
+    driver.set_step_mode(32)  # 1/32 microstepping for smoothest operation
 
-    # Override defaults with J6 optimizations
-    print("[*] Writing J6 register overrides...")
-    driver._write_reg(REG_OFF, 0x020)     # 62.5kHz PWM (quieter than 41.7kHz)
-    driver._write_reg(REG_DECAY, 0x110)   # Slow/Mixed decay (better torque, still quiet)
-    driver._write_reg(REG_DRIVE, 0xF59)   # 200/400mA MAX (strong gate drive)
-    # STALL and BLANK already set by reset_settings() - don't override
+    # NO register overrides - use pololu_lib defaults which work in diagnostic
+    # (If this works, we can add J6 optimizations gradually)
     time.sleep(0.05)  # Let settings settle
 
     # Verify configuration by reading registers
     can_read_spi = verify_registers(driver)
-
-    # CRITICAL: Verify J6 register writes worked (only check what we wrote)
-    if can_read_spi:
-        print("[*] Verifying J6 register writes...")
-        off_val = driver._read_reg(REG_OFF)
-        decay_val = driver._read_reg(REG_DECAY)
-        drive_val = driver._read_reg(REG_DRIVE)
-
-        errors = []
-        if off_val != 0x020: errors.append(f"OFF: wrote 0x020, read 0x{off_val:03X}")
-        if decay_val != 0x110: errors.append(f"DECAY: wrote 0x110, read 0x{decay_val:03X}")
-        if drive_val != 0xF59: errors.append(f"DRIVE: wrote 0xF59, read 0x{drive_val:03X}")
-
-        if errors:
-            print("\n[!] CRITICAL: SPI WRITE VERIFICATION FAILED!")
-            print("    Register readback errors:")
-            for err in errors:
-                print(f"      - {err}")
-            print("    This indicates SPI communication is corrupted")
-            print("    Possible causes:")
-            print("      - SPI speed mismatch (should be 500kHz)")
-            print("      - SPI bus not properly reset after LCD use")
-            print("      - Hardware SPI connection issue")
-            driver.disable_driver()
-            return
-        else:
-            print("    [OK] All J6 register writes verified")
+    # Using pololu_lib defaults - no need to verify overrides
 
     # Clear faults multiple times - sometimes chip needs multiple writes
     if can_read_spi:
