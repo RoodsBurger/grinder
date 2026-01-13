@@ -133,12 +133,19 @@ def run_motor(target_rpm):
         print(f"    [!] Could not check SPI state: {e}")
 
     # Initialize motor driver (will open SPI at correct 500kHz)
-    # NOTE: Don't power cycle SLEEP here - motor_control.py owns that pin
     print("[*] Initializing motor driver at 500kHz SPI...")
     driver = HighPowerStepperDriver(
         spi_bus=0, spi_device=0,
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
+
+    # CRITICAL: Power cycle SLEEP to clear any latched faults from previous runs
+    # Even though motor_control.py initialized GPIO, we need a clean reset here
+    print("[*] Power cycling SLEEP pin to clear latched faults...")
+    GPIO.output(SLEEP_PIN, GPIO.LOW)
+    time.sleep(0.1)  # Hold reset for 100ms
+    GPIO.output(SLEEP_PIN, GPIO.HIGH)
+    time.sleep(0.1)  # Wait for chip to wake up
 
     # Verify SPI is at correct speed
     print(f"    [OK] SPI opened at {driver.spi.max_speed_hz}Hz")
