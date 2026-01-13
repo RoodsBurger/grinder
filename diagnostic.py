@@ -6,7 +6,7 @@ Tests SPI communication, fault detection, and motor movement
 import time
 import RPi.GPIO as GPIO
 import spidev
-from StepperLibrary import StepperMotor, Direction, MicrostepMode, _DRV8711
+from pololu_lib import HighPowerStepperDriver
 
 # --- PIN CONFIGURATION ---
 SCS_PIN   = 8    # GPIO8  (Pin 24)
@@ -19,47 +19,91 @@ SLEEP_PIN = 7    # GPIO7  (Pin 26)
 # (hold CS High) to prevent it from interfering with Motor MISO data.
 LCD_CS_PIN = 22  # GPIO22 (Pin 15) per your wiring guide
 
+# --- DRV8711 REGISTER MAP ---
+REG_CTRL = 0x00
+REG_TORQUE = 0x01
+REG_OFF = 0x02
+REG_BLANK = 0x03
+REG_DECAY = 0x04
+REG_DRIVE = 0x05
+REG_STATUS = 0x06
+REG_STALL = 0x07
+
 def print_header(msg):
     print("\n" + "="*60)
     print(f"  {msg}")
     print("="*60)
 
-def check_spi_communication(driver_low):
-    """Test SPI read/write using low-level _DRV8711 interface"""
+def check_spi_communication(driver):
+    """Test SPI read/write using pololu_lib driver"""
     print_header("TEST 1: SPI COMMUNICATION")
 
-    val_initial = driver_low.read(_DRV8711.TORQUE)
-    print(f"[*] Initial TORQUE Register Value: 0x{val_initial:03X}")
+    # Try multiple reads to see if consistent
+    print("[*] Testing SPI MISO (Read) Line...")
+    reads = []
+    for i in range(5):
+        val = driver._read_reg(REG_TORQUE)
+        reads.append(val)
+        print(f"    Read #{i+1}: 0x{val:03X}")
 
-    if val_initial == 0x000:
-        print("[!] ERROR: Read 0x000. SPI MISO (SDATO) might be disconnected.")
-        print("    OR: The LCD Display might be hogging the bus.")
-        return False
-    if val_initial == 0xFFF:
-        print("[!] ERROR: Read 0xFFF. SPI MISO (SDATO) might be floating.")
+    val_initial = reads[0]
+
+    # Analyze read pattern
+    all_same = all(r == val_initial for r in reads)
+    all_fff = all(r == 0xFFF for r in reads)
+    all_000 = all(r == 0x000 for r in reads)
+
+    print(f"\n[*] Read Pattern Analysis:")
+    print(f"    All reads identical: {all_same}")
+    print(f"    All reads 0xFFF: {all_fff}")
+    print(f"    All reads 0x000: {all_000}")
+
+    if all_fff:
+        print("\n[!] ERROR: Consistent 0xFFF - MISO line is FLOATING")
+        print("    Possible causes:")
+        print("    1. MISO (GPIO9/Pin 21) not connected to DRV8711 SDATO")
+        print("    2. MISO trace broken on PCB")
+        print("    3. DRV8711 not outputting data (chip fault)")
+        print("    4. SPI mode mismatch (CPOL/CPHA)")
         return False
 
+    if all_000:
+        print("\n[!] ERROR: Consistent 0x000 - MISO line stuck LOW")
+        print("    Possible causes:")
+        print("    1. LCD Display CS not disabled (interfering)")
+        print("    2. MISO shorted to ground")
+        print("    3. Multiple SPI devices conflicting")
+        return False
+
+    # Try write and read back test
     test_val = 0x1AA
-    print(f"[*] Writing Test Value: 0x{test_val:03X}...")
-    driver_low.write(_DRV8711.TORQUE, test_val)
+    print(f"\n[*] Write/Read Test - Writing 0x{test_val:03X} to TORQUE register...")
+    driver._write_reg(REG_TORQUE, test_val)
     time.sleep(0.01)
 
-    val_readback = driver_low.read(_DRV8711.TORQUE)
-    print(f"[*] Readback Value:    0x{val_readback:03X}")
+    val_readback = driver._read_reg(REG_TORQUE)
+    print(f"[*] Readback Value: 0x{val_readback:03X}")
 
     if val_readback == test_val:
         print("[OK] SPI Communication Successful!")
-        driver_low.write(_DRV8711.TORQUE, 0x1FF) # Restore default
+        print("    MOSI (write) working: YES")
+        print("    MISO (read) working: YES")
+        driver._write_reg(REG_TORQUE, 0x1FF) # Restore default
         return True
     else:
-        print("[!] ERROR: Readback did not match write.")
+        print("[!] ERROR: Readback mismatch!")
+        print(f"    Expected: 0x{test_val:03X}")
+        print(f"    Got:      0x{val_readback:03X}")
+        print("\n[*] MOSI (write) working: PROBABLY YES (can't verify without reads)")
+        print("[*] MISO (read) working: NO")
+        print("\n[i] You can still run in BLIND MODE - writes should work")
         return False
 
-def check_status_register(driver_low, ignore_stall=False, spi_verified=False):
+def check_status_register(driver, ignore_stall=False, spi_verified=False):
     """Check DRV8711 STATUS register for faults"""
     print_header("TEST 2: DRIVER STATUS & FAULTS")
 
-    status = driver_low.read(_DRV8711.STATUS)
+    status = driver._read_reg(REG_STATUS)
     print(f"[*] STATUS Register: 0x{status:03X} (Binary: {status:012b})")
 
     # Only warn about 0x00 if we haven't verified SPI works yet
@@ -103,43 +147,54 @@ def check_status_register(driver_low, ignore_stall=False, spi_verified=False):
 
     return True
 
-def test_motor_movement(motor, driver_low, blind_mode=False):
+def test_motor_movement(driver, blind_mode=False):
     """Test motor movement with safety checks"""
     print_header("TEST 3: MOTOR MOVEMENT")
     print("(!) WARNING: Motor may move.")
 
     # Clear faults
-    driver_low.write(_DRV8711.STATUS, 0)
+    driver._write_reg(REG_STATUS, 0)
 
     # 1.0 Amps is safer for bench testing than 4.2 Amps
-    print("[*] Setting Test Current to 1000mA (24% torque)...")
-    motor.set_torque_percent(24)  # 24% of 4200mA = ~1000mA
-    motor.set_microstep_mode(MicrostepMode.SIXTEENTH_STEP)
+    print("[*] Setting Test Current to 1000mA...")
+    driver.set_current_milliamps(1000)
+    driver.set_step_mode(16)  # 1/16 step
 
     print("[*] Enabling Driver...")
-    motor.enable()
+    driver.enable_driver()
     time.sleep(0.1)
 
     if not blind_mode:
         # Check status but don't abort on Stall
-        if not check_status_register(driver_low, ignore_stall=True, spi_verified=True):
+        if not check_status_register(driver, ignore_stall=True, spi_verified=True):
             print("[!] Aborting due to CRITICAL FAULT.")
-            motor.disable()
+            driver.disable_driver()
             return
     else:
         print("[!] BLIND MODE: Skipping fault check (SPI Read Broken).")
 
+    # Manual stepping - 400 steps forward then backward
     print("\n[*] Stepping Forward (400 steps)...")
-    motor.run_for_time(duration=0.4, speed=1000, direction=Direction.CW)
+    GPIO.output(DIR_PIN, GPIO.HIGH)
+    for _ in range(400):
+        GPIO.output(STEP_PIN, GPIO.HIGH)
+        time.sleep(0.001)  # 1ms high
+        GPIO.output(STEP_PIN, GPIO.LOW)
+        time.sleep(0.001)  # 1ms low
 
     print("[*] Stepping Backward (400 steps)...")
-    motor.run_for_time(duration=0.4, speed=1000, direction=Direction.CCW)
+    GPIO.output(DIR_PIN, GPIO.LOW)
+    for _ in range(400):
+        GPIO.output(STEP_PIN, GPIO.HIGH)
+        time.sleep(0.001)
+        GPIO.output(STEP_PIN, GPIO.LOW)
+        time.sleep(0.001)
 
-    motor.disable()
+    driver.disable_driver()
     print("\n[OK] Movement sequence finished.")
 
 def main():
-    motor = None
+    driver = None
     try:
         print("\nInitializing Driver for Diagnostics...")
 
@@ -150,31 +205,36 @@ def main():
         GPIO.output(LCD_CS_PIN, GPIO.HIGH) # Set High to DISABLE LCD
         print(f"[*] LCD CS (GPIO {LCD_CS_PIN}) set HIGH to prevent SPI conflict.")
 
-        motor = StepperMotor(
+        # Setup GPIO pins for manual stepping
+        GPIO.setup(STEP_PIN, GPIO.OUT)
+        GPIO.setup(DIR_PIN, GPIO.OUT)
+        GPIO.output(STEP_PIN, GPIO.LOW)
+        GPIO.output(DIR_PIN, GPIO.LOW)
+
+        driver = HighPowerStepperDriver(
             cs_pin=SCS_PIN,
             step_pin=STEP_PIN,
             dir_pin=DIR_PIN,
-            sleep_pin=SLEEP_PIN,
-            max_current_ma=4200
+            sleep_pin=SLEEP_PIN
         )
 
         # Clear faults
-        motor._driver.write(_DRV8711.STATUS, 0)
+        driver._write_reg(REG_STATUS, 0)
         time.sleep(0.1)
 
-        spi_ok = check_spi_communication(motor._driver)
+        spi_ok = check_spi_communication(driver)
 
         if spi_ok:
             # Pass spi_verified=True so it doesn't warn about 0x00 status
-            check_status_register(motor._driver, spi_verified=True)
-            test_motor_movement(motor, motor._driver)
+            check_status_register(driver, spi_verified=True)
+            test_motor_movement(driver)
         else:
             print("\n[!] CRITICAL: SPI Test Failed.")
             print("    However, this might just be the READ line (MISO).")
             print("    The WRITE line (MOSI) might still work.")
             response = input("    >>> Attempt Blind Motor Movement? (y/n): ")
             if response.lower() == 'y':
-                test_motor_movement(motor, motor._driver, blind_mode=True)
+                test_motor_movement(driver, blind_mode=True)
 
     except KeyboardInterrupt:
         print("\n\n[!] Interrupted by user.")
@@ -183,9 +243,10 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
-        if motor:
+        if driver:
             print("\n[*] Cleaning up...")
-            motor.cleanup()
+            driver.disable_driver()
+        GPIO.cleanup()
         print("[*] Diagnostic complete.")
 
 if __name__ == "__main__":

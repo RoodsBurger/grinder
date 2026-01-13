@@ -71,6 +71,7 @@ SPI_SPEED = 4000000  # 4MHz (DRV8711 max is 5MHz)
 # GLOBAL STATE
 # ============================================================================
 emergency_stop = False
+current_ctrl_value = 0x000  # Track CTRL register for blind mode
 
 # ============================================================================
 # DATA STRUCTURES FOR RESULTS COLLECTION
@@ -291,6 +292,8 @@ def setup_driver(config: Dict) -> bool:
     Configure DRV8711 registers from config dictionary
     Returns True if successful, False if critical error
     """
+    global current_ctrl_value
+
     try:
         # Calculate TORQUE register and ISGAIN for requested current
         torque_val, isgain_bits = calculate_torque_register(
@@ -302,6 +305,9 @@ def setup_driver(config: Dict) -> bool:
         ctrl = config['ctrl_base']
         ctrl = (ctrl & ~0x300) | (isgain_bits << 8)  # Set ISGAIN bits [9:8]
         ctrl = ctrl & ~0x01  # Ensure disabled initially
+
+        # Store CTRL value for blind mode enable/disable
+        current_ctrl_value = ctrl
 
         # Wake up driver
         GPIO.output(SLEEP_PIN, GPIO.HIGH)
@@ -343,24 +349,24 @@ def setup_driver(config: Dict) -> bool:
 
 def enable_driver():
     """Enable the driver (set ENBL bit in CTRL register)"""
-    ctrl = read_reg(REG_CTRL)
-    if ctrl == 0xFFF or ctrl == 0x000:
-        # Blind mode - assume CTRL was set correctly, just set bit 0
-        # This won't work for blind mode - we need to track CTRL value
-        print("[!] WARNING: Cannot read CTRL in blind mode")
-    else:
-        write_reg(REG_CTRL, ctrl | 0x01)
+    global current_ctrl_value
+
+    # Use tracked CTRL value to avoid needing to read (works in blind mode)
+    ctrl_enabled = current_ctrl_value | 0x01
+    write_reg(REG_CTRL, ctrl_enabled)
+    current_ctrl_value = ctrl_enabled  # Update tracked value
     time.sleep(0.001)
 
 def disable_driver():
     """Fully disable driver - clear ENBL bit and pull SLEEP low"""
-    try:
-        ctrl = read_reg(REG_CTRL)
-        if ctrl != 0xFFF and ctrl != 0x000:
-            write_reg(REG_CTRL, ctrl & ~0x01)
-    except:
-        pass  # Blind mode
+    global current_ctrl_value
 
+    # Use tracked CTRL value to avoid needing to read (works in blind mode)
+    ctrl_disabled = current_ctrl_value & ~0x01
+    write_reg(REG_CTRL, ctrl_disabled)
+    current_ctrl_value = ctrl_disabled  # Update tracked value
+
+    # Pull SLEEP low for complete shutdown (no idle torque)
     GPIO.output(SLEEP_PIN, GPIO.LOW)
     time.sleep(0.1)
 
