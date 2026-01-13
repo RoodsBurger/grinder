@@ -132,11 +132,18 @@ def run_motor(target_rpm):
     # Verify configuration by reading registers
     can_read_spi = verify_registers(driver)
 
-    # Check initial status
+    # Clear any old faults from previous runs BEFORE checking status
     if can_read_spi:
-        print("\n[*] Checking initial STATUS register...")
+        print("\n[*] Clearing any old faults...")
+        driver.clear_faults()
+        time.sleep(0.01)
+
+    # Check status after clearing faults
+    if can_read_spi:
+        print("[*] Checking STATUS register...")
         if not check_status(driver):
-            print("[!] Aborting due to critical fault")
+            print("[!] CRITICAL: Faults detected even after clearing!")
+            print("[!] Check wiring and power supply")
             driver.disable_driver()
             return
 
@@ -144,12 +151,13 @@ def run_motor(target_rpm):
     print(f"\n[*] Enabling driver and starting motor at {target_rpm} RPM...")
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
     driver.enable_driver()
-    driver.clear_faults()
 
     # Verify enabled successfully
     if can_read_spi:
         time.sleep(0.1)
-        check_status(driver)
+        if not check_status(driver):
+            print("[!] WARNING: Faults detected after enabling")
+            # Continue anyway - might clear during operation
 
     # Close SPI - only GPIO needed for stepping
     driver.spi.close()
