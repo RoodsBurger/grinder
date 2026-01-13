@@ -328,6 +328,9 @@ def enable_driver():
     ctrl_enabled = current_ctrl_value | 0x01
     write_reg(REG_CTRL, ctrl_enabled)
     current_ctrl_value = ctrl_enabled  # Update tracked value
+
+    # Clear any faults that may have occurred during sleep
+    write_reg(REG_STATUS, 0x000)
     time.sleep(0.001)
 
 def disable_driver():
