@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SIMPLE MOTOR TEST - Minimal code to verify hardware works
-Uses optimized quiet configuration (41.7kHz PWM, 1/32 step, ABT enabled)
+Uses StepperLibrary configuration (41.7kHz PWM, 1/32 step, Auto-Mixed decay)
 """
 import RPi.GPIO as GPIO
 import spidev
@@ -43,22 +43,22 @@ def setup_driver():
     """Configure driver with optimized quiet settings"""
     print("Configuring DRV8711...")
 
-    # Configuration: combo_pololu_32step (quietest proven settings)
-    # Current: 4200mA, 1/32 step, 41.7kHz PWM, ABT enabled
+    # Configuration: Matches StepperLibrary._init_registers()
+    # Current: 4200mA, 1/32 step, 41.7kHz PWM, Auto-Mixed decay
 
     # Calculate TORQUE for 4200mA with ISGAIN=20 (bits 9:8 = 0b10)
-    # Formula: torque_bits = (384 * (4200*2)) / 6875 = 234 = 0xEA
+    # Formula: torque_bits = int(4200 / 1000.0 * 55.85) = 234 = 0xEA
     TORQUE = 0xEA   # 4200mA at gain 20
 
     # CTRL: Gain 20 (bits 9:8=10), 1/32 step (bits 6:3=0101), Disabled (bit 0=0)
     CTRL   = 0xA28  # 1010 0010 1000
 
-    # Other registers (optimized for quiet operation)
+    # Register values from StepperLibrary
     OFF    = 0x030  # 24µs = 41.7kHz PWM (ABOVE audible!)
-    BLANK  = 0x180  # ABT enabled (bit 8) for smooth 1/32 stepping
-    DECAY  = 0x510  # Auto-Mixed decay (TI recommended)
+    BLANK  = 0x080  # 2.56µs blank time
+    DECAY  = 0x510  # Auto-Mixed decay
     STALL  = 0x040  # Default stall detection
-    DRIVE  = 0xA59  # 150/300mA gate drive (Pololu default)
+    DRIVE  = 0xA59  # 150/300mA gate drive
 
     # Write registers in Pololu order (CTRL last)
     write_reg(0x01, TORQUE)  # TORQUE
@@ -76,7 +76,7 @@ def setup_driver():
     # Clear faults
     write_reg(0x07, 0x000)  # STATUS
 
-    print("Driver configured: 4200mA, 1/32 step, 41.7kHz PWM, ABT enabled")
+    print("Driver configured: 4200mA, 1/32 step, 41.7kHz PWM, Auto-Mixed decay")
 
 def run_motor(rpm=200, duration=5):
     """Run motor at specified RPM for duration seconds"""
