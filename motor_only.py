@@ -41,8 +41,8 @@ def run_motor(target_rpm):
         cs_pin=SCS_PIN, dir_pin=DIR_PIN, step_pin=STEP_PIN, sleep_pin=SLEEP_PIN
     )
     driver.reset_settings()
-    driver.set_current_milliamps(6500)
-    driver.set_step_mode(32)
+    driver.set_current_milliamps(4200)  # Match motor rating (was 6500 - 55% overcurrent!)
+    driver.set_step_mode(16)  # 1/16 for more torque and less noise (was 1/32)
 
     # Set direction
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)

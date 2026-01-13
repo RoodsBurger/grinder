@@ -43,13 +43,13 @@ class HighPowerStepperDriver:
         self.reset_pin = reset_pin
         self.cs_pin = cs_pin
 
-        # Default Register Values (Safe Defaults)
+        # Default Register Values (Optimized for NEMA 23 4.2A motor)
         self.regs = {
             REG_CTRL:   0xC10, # Gain 5, 1/4 Step
             REG_TORQUE: 0x1FF,
-            REG_OFF:    0x030,
-            REG_BLANK:  0x080,
-            REG_DECAY:  0x110, # Auto Mixed Decay
+            REG_OFF:    0x0A0, # 80µs off-time (was 24µs) - reduces noise
+            REG_BLANK:  0x080, # 2.56µs blank time
+            REG_DECAY:  0x510, # Auto-Mixed decay (mode 5) for smooth operation
             REG_STALL:  0x040,
             REG_DRIVE:  0xA59,
         }
