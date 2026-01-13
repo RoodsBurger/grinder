@@ -60,20 +60,22 @@ class TouchScreen:
             # Reset touch controller
             self.reset()
 
-            # Initialize I2C
+            # Initialize I2C (wait a bit after reset)
+            time.sleep(0.1)
             try:
                 self.bus = smbus2.SMBus(self.i2c_bus)
             except Exception as e:
                 print(f"ERROR: Failed to open I2C bus {self.i2c_bus}: {e}")
                 return False
 
-            # Check if device is present (with retries)
+            # Check if device is present (with more retries and longer delays)
             device_found = False
-            for attempt in range(3):
+            for attempt in range(5):
                 if self.who_am_i():
                     device_found = True
                     break
-                time.sleep(0.05)
+                if attempt < 4:  # Don't sleep on last attempt
+                    time.sleep(0.2)  # Longer delay between retries
 
             if device_found:
                 try:
@@ -94,9 +96,9 @@ class TouchScreen:
     def reset(self):
         """Hardware reset of touch controller"""
         GPIO.output(self.TP_RST, GPIO.LOW)
-        time.sleep(0.01)
+        time.sleep(0.05)  # Longer reset pulse
         GPIO.output(self.TP_RST, GPIO.HIGH)
-        time.sleep(0.05)
+        time.sleep(0.2)  # More time for controller to boot
 
     def who_am_i(self):
         """Check if touch controller is present"""

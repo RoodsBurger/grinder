@@ -281,17 +281,20 @@ def main():
     disp = LCD_1inch28()
     disp.init_display()
 
-    # Wait for display to stabilize before initializing touch
-    time.sleep(0.5)
+    # Wait longer for display and I2C bus to stabilize
+    print("[*] Waiting for display to stabilize...")
+    time.sleep(1.0)
 
-    # Initialize touch
+    # Initialize touch with retries
+    print("[*] Initializing touch controller...")
     touch = TouchScreen()
     if not touch.init():
-        print("WARNING: Touch controller initialization failed, retrying...")
+        print("[!] WARNING: Touch controller initialization failed, retrying...")
         time.sleep(1)
         if not touch.init():
-            print("ERROR: Touch controller still not responding!")
-            # Continue anyway - UI will show but touch won't work
+            print("[!] ERROR: Touch controller still not responding!")
+            print("[!] UI will show but touch input won't work")
+            print("[!] Check wiring: SDA=GPIO2, SCL=GPIO3, RST=GPIO21, INT=GPIO27")
 
     rpm = 200
     motor_proc = None
