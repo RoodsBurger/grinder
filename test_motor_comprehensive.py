@@ -317,8 +317,12 @@ def setup_driver(config: Dict) -> bool:
         return False
 
 def enable_driver():
-    """Enable the driver (set ENBL bit in CTRL register)"""
+    """Enable the driver (wake from sleep and set ENBL bit in CTRL register)"""
     global current_ctrl_value
+
+    # Wake up driver from sleep
+    GPIO.output(SLEEP_PIN, GPIO.HIGH)
+    time.sleep(0.001)
 
     # Use tracked CTRL value to avoid needing to read (works in blind mode)
     ctrl_enabled = current_ctrl_value | 0x01
