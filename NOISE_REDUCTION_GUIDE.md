@@ -86,19 +86,28 @@ From research:
 sudo python3 test_motor_noise.py
 ```
 
-**Pre-configured tests:**
-1. `2_current_4200` - Current baseline
-2. `7_drive_low` - **TRY THIS FIRST** (fixes DRIVE register)
-3. `6_blank_abt` - Enable adaptive blanking
-4. `3_off_short` - Higher PWM frequency (25 kHz)
-5. `5_off_very_long` - Lower PWM frequency (4 kHz)
-6. `12_combo_quiet` - Best combination for quiet operation
+**The script now has 50+ test configurations organized into 8 categories:**
 
-**Recommended testing order:**
-1. Start with `7_drive_low` (fix DRIVE register)
-2. Then `6_blank_abt` (enable ABT)
-3. Then `3_off_short` or `5_off_very_long` (adjust PWM freq)
-4. Finally `12_combo_quiet` (all optimizations)
+1. **BASELINE** (2 tests) - Compare before/after DRIVE fix
+2. **PWM FREQUENCY** (9 tests) - Sweep from 20µs to 250µs (50kHz to 4kHz)
+3. **BLANKING TIME** (6 tests) - Test different blank times + ABT
+4. **DRIVE CURRENT** (4 tests) - Test gate drive currents (min to max)
+5. **MICROSTEPPING** (6 tests) - Test 1/4 to 1/128 step modes
+6. **DECAY MODE** (6 tests) - Test all decay mode variations
+7. **CURRENT LEVEL** (3 tests) - Test 80%, 90%, 100% motor current
+8. **OPTIMIZED COMBOS** (5 tests) - Pre-tuned quiet configurations
+
+**Quick recommended sequence (select [Q] option):**
+1. `baseline_new` - Verify DRIVE register fix is working
+2. `combo_balanced` - Good starting point (16step + 25kHz PWM)
+3. `combo_silent_high_freq` - High PWM approach (32step + 42kHz)
+4. `combo_silent_low_freq` - Low PWM approach (32step + 4kHz)
+
+**The script now includes register verification:**
+- Reads back all written register values
+- Decodes actual microstepping from CTRL register
+- Warns if register writes don't match expected values
+- Confirms settings were applied correctly
 
 ## Expected Results
 
