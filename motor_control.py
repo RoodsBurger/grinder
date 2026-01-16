@@ -19,7 +19,7 @@ SLEEP_PIN = 7
 # --- CONFIGURATION ---
 MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (8000mA, 100kHz PWM, 1/64 step)
 MIN_RPM = 0
-MAX_RPM = 400
+MAX_RPM = 300
 STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
 
 # Display Settings - Render at 2x for crispness
@@ -116,7 +116,7 @@ def map_touch(x, y, debug=False):
     if 135 <= eff_angle <= 405:
         ratio = (eff_angle - 135) / 270
         rpm_value = MIN_RPM + ratio * (MAX_RPM - MIN_RPM)
-        return int(round(rpm_value / 5) * 5)
+        return int(round(rpm_value / 10) * 10)
 
     return None
 
@@ -157,9 +157,9 @@ def draw_ui(disp, rpm, is_running):
     if icon:
         img.paste(icon, (CENTER[0] - ICON_SIZE, CENTER[1] - ICON_SIZE), icon)
 
-    # RPM text
+    # RPM text (display at half - gearbox reduction)
     if CACHED_FONT:
-        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm} RPM",
+        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm // 2} RPM",
                  font=CACHED_FONT, fill=(150,150,150), anchor="mm")
 
     disp.show_image(img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS))
