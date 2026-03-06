@@ -40,8 +40,9 @@ A Raspberry Pi-based controller for a motorized coffee grinder, featuring a circ
 
 ```
 grinder/
-├── motor_control.py          # Main application: UI + touch + motor orchestration
+├── motor_control.py          # Main application: UI + touch + process orchestration
 ├── motor_only.py             # Subprocess: standalone motor runner (DRV8711 + step pulses)
+├── servo_only.py             # Subprocess: standalone bean feeder servo (trap-door cycle)
 ├── lcd_display.py            # LCD driver: GC9A01 display via SPI
 ├── touch_screen.py           # Touch driver: CST816T via I2C
 ├── motor_configs.json        # 88+ DRV8711 configurations (categories A-K)
@@ -58,26 +59,48 @@ grinder/
 
 ## How It Works
 
+### Bean Feeder Servo (`servo_only.py`)
+
+Runs as a second subprocess alongside `motor_only.py`, controlling a servo on **GPIO 26** (via `gpiozero` + `LGPIOFactory`) that opens and closes a trap-door gate to feed beans into the grinder.
+
+- Servo position: `-1.0` = closed, `1.0` = open (full range).
+- Cycle: open for `<open_time>` seconds → close → wait 0.3 s for servo to move → cut PWM signal (prevents jitter) → wait remaining closed time → repeat.
+- Closed time is always **1.0 s** total (hardcoded).
+- Accepts SIGTERM for graceful shutdown (closes gate before exiting).
+
+```bash
+# Run directly for testing
+python3 servo_only.py 2.0   # open 2 s / closed 1 s
+```
+
+Requires: `sudo apt install python3-lgpio`, `pip3 install gpiozero`
+
 ### Main Application (`motor_control.py`)
 
 The entry point for normal operation. Requires `sudo` (GPIO access).
 
-**UI:**
-- Rendered at 2x resolution (480x480) then downscaled to 240x240 via Lanczos for crisp anti-aliased output.
-- Circular arc slider (135° to 405°) to set RPM.
-- Center button: green (coffee bean icon) when stopped, red (ground coffee icon) when running.
-- RPM is displayed at half the set value to account for the 2:1 gearbox.
-- Standby mode: after 10 minutes of inactivity (motor not running), the display and backlight sleep. Any touch wakes it.
+**Two screens — swipe left/right to switch between them:**
+
+| Screen | Arc color | Controls | Label |
+|---|---|---|---|
+| RPM (screen 0) | Blue | Motor speed 0–300 RPM (snaps to 10) | `X RPM` (at half, gearbox) |
+| Feed (screen 1) | Amber | Gate open time 0.5–8.0 s (snaps to 0.5) | `X.Xs open` |
+
+Two navigation dots at the bottom of the display show which screen is active.
 
 **Touch handling:**
-- Touch within ~22px of center = button press (start/stop).
-- Touch on the arc ring = RPM adjustment (snaps to nearest 10 RPM, range 0-300).
-- Slider is locked while motor is running.
+- Touch within ~22px of center = button press (start/stop both motor and feeder).
+- Touch on the arc ring = value adjustment (locked while running).
+- Horizontal swipe (>75 px, predominantly horizontal) = switch screen.
 
-**Motor process management:**
-- Motor runs in a separate subprocess (`motor_only.py`) to isolate timing-critical step pulse generation.
-- Before spawning the subprocess, the LCD closes its SPI handle. After the motor stops, SPI is reopened and the display is redrawn.
-- If the motor subprocess exits unexpectedly, the UI recovers automatically.
+**Process management:**
+- Both `motor_only.py` and `servo_only.py` run as parallel subprocesses.
+- Before spawning them, the LCD closes its SPI handle (motor uses the same SPI bus). After stopping, SPI is reopened.
+- If either subprocess exits unexpectedly, both are stopped and the UI resets.
+
+**Other:**
+- Renders at 2x (480x480) then downscales via Lanczos for crisp anti-aliased output.
+- Standby: after 10 min of inactivity (motor off), display sleeps. Any touch wakes it.
 
 ### Motor Subprocess (`motor_only.py`)
 
@@ -91,7 +114,7 @@ Runs independently with no display or touch logic.
 6. Uses `time.perf_counter()` busy-wait for precise step timing.
 7. On SIGTERM/SIGINT: sets `shutdown_requested = True`, exits the step loop, pulls SLEEP LOW.
 
-Active config in `motor_control.py`: **K4** (8000 mA, 100 kHz PWM, 1/64 microstepping).
+Active motor config in `motor_control.py`: **K4** (8000 mA, 100 kHz PWM, 1/64 microstepping).
 
 ### LCD Driver (`lcd_display.py`)
 
@@ -241,13 +264,13 @@ sudo python3 test_motor_comprehensive.py
 
 ```bash
 # System packages
-sudo apt-get install -y python3-pip python3-pil python3-numpy
+sudo apt-get install -y python3-pip python3-pil python3-numpy python3-lgpio
 
 # Python packages
-pip3 install spidev smbus2 RPi.GPIO
+pip3 install spidev smbus2 RPi.GPIO gpiozero
 ```
 
-Required Python modules: `RPi.GPIO`, `spidev`, `smbus2`, `PIL` (Pillow), `numpy`
+Required Python modules: `RPi.GPIO`, `spidev`, `smbus2`, `PIL` (Pillow), `numpy`, `gpiozero`, `lgpio`
 
 ---
 
