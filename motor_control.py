@@ -338,8 +338,7 @@ def main():
                             elif is_on_knob(x, y, rpm) and motor_proc is None:
                                 interact_state = INTERACT_KNOB_WAITING
                                 print(f"TOUCH: Knob pressed at ({x},{y}), hold {KNOB_HOLD_TIME}s to activate")
-                                draw_ui(disp, rpm, is_running=False,
-                                        knob_color=COL_KNOB_WAITING, highlight=True)
+                                draw_ui(disp, rpm, is_running=False, highlight=True)
 
                             else:
                                 interact_state = INTERACT_IDLE
@@ -353,8 +352,7 @@ def main():
                                 if hold_time >= KNOB_HOLD_TIME:
                                     interact_state = INTERACT_KNOB_ACTIVE
                                     print(f"TOUCH: Knob ACTIVE after {hold_time:.2f}s hold")
-                                    draw_ui(disp, rpm, is_running=False,
-                                            knob_color=COL_KNOB_ACTIVE, highlight=True)
+                                    draw_ui(disp, rpm, is_running=False, highlight=True)
                                 else:
                                     print(f"TOUCH: Knob waiting ({hold_time:.2f}s / {KNOB_HOLD_TIME}s)")
 
@@ -363,8 +361,7 @@ def main():
                                 if new_rpm is not None and new_rpm != rpm:
                                     print(f"TOUCH: Drag → RPM {rpm} → {new_rpm}")
                                     rpm = new_rpm
-                                    draw_ui(disp, rpm, is_running=False,
-                                            knob_color=COL_KNOB_ACTIVE, highlight=True)
+                                    draw_ui(disp, rpm, is_running=False, highlight=True)
 
                             elif interact_state == INTERACT_BUTTON:
                                 hold_time = current_time - interact_start_time
