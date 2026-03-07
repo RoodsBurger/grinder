@@ -56,8 +56,8 @@ COL_TEXT = (255, 255, 255)
 KNOB_HIT_RADIUS = 28   # px (real coords) - must press within this distance of knob
 KNOB_HOLD_TIME  = 1.0  # seconds to hold on knob before drag activates
 BUTTON_MAX_TAP  = 0.5  # seconds - button press longer than this is ignored
-RELEASE_TIMEOUT = 0.15 # seconds of no touch events before treating as finger-lift
-                       # (INT pin pulses in mixed mode rather than staying LOW)
+BUTTON_RELEASE_TIMEOUT = 0.08  # 80ms — fast tap response for button
+KNOB_RELEASE_TIMEOUT   = 0.50  # 500ms — CST816T can go silent 200ms+ while holding still
 
 # Interaction states
 INTERACT_IDLE         = 0
@@ -294,6 +294,13 @@ def main():
 
                         last_activity_time = current_time
 
+                        # Drop trailing reads after a gesture (must check BEFORE gesture handler)
+                        if current_time < gesture_cooldown_until:
+                            touch.get_gesture()  # clear so it doesn't fire after cooldown
+                            print("TOUCH: Gesture cooldown, ignoring")
+                            was_touching = True
+                            continue
+
                         # Hardware gesture → switch screen
                         gesture = touch.get_gesture()
                         if gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT):
@@ -304,12 +311,6 @@ def main():
                             was_touching = False
                             print(f"GESTURE: Swipe {direction} → screen {current_screen}")
                             draw_ui(disp, rpm, is_running=(motor_proc is not None))
-                            continue
-
-                        # Drop trailing reads after a gesture
-                        if current_time < gesture_cooldown_until:
-                            print("TOUCH: Gesture cooldown, ignoring")
-                            was_touching = True
                             continue
 
                         x, y = touch.get_point()
@@ -358,8 +359,9 @@ def main():
                                 hold_time = current_time - interact_start_time
                                 print(f"TOUCH: Button held ({hold_time:.2f}s)")
 
-                # ── RELEASE: no touch event for RELEASE_TIMEOUT ──────────────
-                if was_touching and (current_time - last_touch_event_time) > RELEASE_TIMEOUT:
+                # ── RELEASE: no touch event for state-appropriate timeout ────
+                release_timeout = BUTTON_RELEASE_TIMEOUT if interact_state == INTERACT_BUTTON else KNOB_RELEASE_TIMEOUT
+                if was_touching and (current_time - last_touch_event_time) > release_timeout:
                     hold_time = last_touch_event_time - interact_start_time
                     print(f"TOUCH: Released — state={interact_state}, hold={hold_time:.2f}s")
                     was_touching = False
