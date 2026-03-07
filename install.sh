@@ -19,49 +19,50 @@ INSTALL_DIR="/opt/motor-control"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo ""
-echo "[1/6] Stopping old services..."
+echo "[1/7] Installing Python dependencies..."
+apt-get update
+apt-get install -y python3-pip python3-pil python3-numpy
+pip3 install --break-system-packages spidev smbus2 RPi.GPIO opencv-python-headless
+
+echo ""
+echo "[2/7] Stopping old services..."
 systemctl stop grinder.service 2>/dev/null || true
 systemctl disable grinder.service 2>/dev/null || true
 systemctl stop motor-control.service 2>/dev/null || true
 systemctl stop wifi-setup.service 2>/dev/null || true
 
 echo ""
-echo "[2/6] Creating install directory..."
+echo "[3/7] Creating install directory..."
 mkdir -p "$INSTALL_DIR"
 
 echo ""
-echo "[3/6] Copying files..."
+echo "[4/7] Copying files..."
 cp "$SCRIPT_DIR/motor_control.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/motor_only.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/motor_configs.json" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
-
-# Copy driver files from home directory
-for f in lcd_display.py touch_screen.py pololu_lib.py; do
-    if [ -f "$SCRIPT_DIR/$f" ]; then
-        cp "$SCRIPT_DIR/$f" "$INSTALL_DIR/"
-    elif [ -f "/home/step/$f" ]; then
-        cp "/home/step/$f" "$INSTALL_DIR/"
-    else
-        echo "WARNING: $f not found"
-    fi
-done
+cp "$SCRIPT_DIR/lcd_display.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/touch_screen.py" "$INSTALL_DIR/"
 
 chmod +x "$INSTALL_DIR"/*.py
 
 echo ""
-echo "[4/6] Installing services..."
+echo "[5/7] Installing services..."
 cp "$SCRIPT_DIR/wifi-setup.service" /etc/systemd/system/
 cp "$SCRIPT_DIR/motor-control.service" /etc/systemd/system/
 
 echo ""
-echo "[5/6] Enabling services..."
+echo "[6/7] Enabling services..."
 systemctl daemon-reload
 systemctl enable wifi-setup.service
 systemctl enable motor-control.service
 
 echo ""
-echo "[6/6] Starting services..."
+echo "[7/7] Starting services..."
 systemctl start wifi-setup.service
 systemctl start motor-control.service
+# sudo systemctl stop motor-control.service
+
 
 echo ""
 echo "=========================================="

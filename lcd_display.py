@@ -24,6 +24,7 @@ class LCD_1inch28:
         self.spi = spidev.SpiDev()
         self.spi_bus = 0
         self.spi_device = 0
+        self.spi_open = False  # Track if SPI is currently open
 
     def module_init(self):
         """Initialize GPIO and SPI"""
@@ -38,13 +39,14 @@ class LCD_1inch28:
 
         # Initialize SPI
         self.spi.open(self.spi_bus, self.spi_device)
-        self.spi.max_speed_hz = 40000000  # 40MHz
+        self.spi.max_speed_hz = 80000000  # 80MHz (GC9A01 max spec)
         self.spi.mode = 0b00  # SPI Mode 0
+        self.spi_open = True
 
         # Turn on backlight
         GPIO.output(self.BL_PIN, GPIO.HIGH)
 
-        # CS high (inactive)
+        # CS starts high (inactive)
         GPIO.output(self.CS_PIN, GPIO.HIGH)
 
         return 0
@@ -52,11 +54,33 @@ class LCD_1inch28:
     def module_exit(self):
         """Clean up GPIO and SPI"""
         try:
-            self.spi.close()
+            if self.spi_open:
+                self.spi.close()
+                self.spi_open = False
             GPIO.output(self.BL_PIN, GPIO.LOW)
             GPIO.cleanup()
         except:
             pass
+
+    def close_spi_for_motor(self):
+        """Close SPI so motor subprocess can use it"""
+        if self.spi_open:
+            try:
+                self.spi.close()
+                self.spi_open = False
+            except Exception as e:
+                print(f"WARNING: Failed to close LCD SPI: {e}")
+
+    def reopen_spi_after_motor(self):
+        """Reopen SPI after motor subprocess finishes"""
+        if not self.spi_open:
+            try:
+                self.spi.open(self.spi_bus, self.spi_device)
+                self.spi.max_speed_hz = 80000000
+                self.spi.mode = 0b00
+                self.spi_open = True
+            except Exception as e:
+                print(f"ERROR: Failed to reopen LCD SPI: {e}")
 
     def reset(self):
         """Hardware reset"""
@@ -77,7 +101,7 @@ class LCD_1inch28:
     def write_data(self, data):
         """Write data byte to display"""
         GPIO.output(self.DC_PIN, GPIO.HIGH)  # Data mode
-        GPIO.output(self.CS_PIN, GPIO.LOW)   # Select chip
+        GPIO.output(self.CS_PIN, GPIO.LOW)  # Select chip
         if isinstance(data, int):
             self.spi.writebytes([data])
         else:
@@ -197,25 +221,46 @@ class LCD_1inch28:
         pixel_data[:, :, 0] = high_byte
         pixel_data[:, :, 1] = low_byte
 
-        # OPTIMIZED: Use ravel() for zero-copy flatten, convert chunks to list
-        pixel_bytes = pixel_data.ravel()
+        # CRITICAL FIX: Convert to list ONCE before loop (not 29 times!)
+        pixel_bytes = pixel_data.ravel().tolist()
 
         # Set window and write data
         self.set_window(0, 0, self.width, self.height)
 
-        # Write in chunks - convert only small chunks to list for speed
+        # Write in chunks - CS stays LOW for entire transfer (efficient!)
         chunk_size = 4096
         GPIO.output(self.DC_PIN, GPIO.HIGH)  # Data mode
-        GPIO.output(self.CS_PIN, GPIO.LOW)   # Select chip
+        GPIO.output(self.CS_PIN, GPIO.LOW)   # Select chip (once)
 
         for i in range(0, len(pixel_bytes), chunk_size):
-            chunk = pixel_bytes[i:i + chunk_size]
-            # Convert only this small chunk to list (much faster than converting all 115K at once)
-            self.spi.writebytes(chunk.tolist())
+            # Just slice the list (already converted)
+            self.spi.writebytes(pixel_bytes[i:i + chunk_size])
 
-        GPIO.output(self.CS_PIN, GPIO.HIGH)  # Deselect
+        GPIO.output(self.CS_PIN, GPIO.HIGH)  # Deselect (once)
 
     def clear(self, color=(0, 0, 0)):
         """Clear the screen with a solid color"""
         image = Image.new('RGB', (self.width, self.height), color)
         self.show_image(image)
+
+    def sleep_display(self):
+        """Enter sleep mode - turn off display and backlight"""
+        try:
+            GPIO.output(self.BL_PIN, GPIO.LOW)  # Backlight off
+            self.write_cmd(0x28)  # Display off
+            time.sleep(0.02)
+            self.write_cmd(0x10)  # Sleep in
+            time.sleep(0.12)
+        except:
+            pass
+
+    def wake_display(self):
+        """Wake from sleep mode - turn on display and backlight"""
+        try:
+            self.write_cmd(0x11)  # Sleep out
+            time.sleep(0.12)
+            self.write_cmd(0x29)  # Display on
+            time.sleep(0.02)
+            GPIO.output(self.BL_PIN, GPIO.HIGH)  # Backlight on
+        except:
+            pass
