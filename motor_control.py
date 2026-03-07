@@ -56,7 +56,7 @@ COL_TEXT = (255, 255, 255)
 
 # Touch interaction
 KNOB_HIT_RADIUS = 38   # px (real coords) - must press within this distance of knob
-KNOB_HOLD_TIME  = 1.0  # seconds to hold on knob before drag activates
+KNOB_HOLD_TIME  = 0.5  # seconds to hold on knob before drag activates
 BUTTON_MAX_TAP  = 0.5  # seconds - button press longer than this is ignored
 BUTTON_RELEASE_TIMEOUT = 0.08  # 80ms — fast tap response for button
 KNOB_RELEASE_TIMEOUT   = 0.50  # 500ms — CST816T can go silent 200ms+ while holding still
