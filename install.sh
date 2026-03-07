@@ -18,25 +18,35 @@ fi
 INSTALL_DIR="/opt/motor-control"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# --- SIMPLE MODE: just restart services ---
+# --- SIMPLE MODE: copy files and restart services (no dependency install) ---
 if [ "$1" == "-simple" ]; then
     echo "=========================================="
-    echo "Restarting Services"
+    echo "Quick Deploy (copy files + restart)"
     echo "=========================================="
+
     echo ""
-    echo "Stopping services..."
+    echo "[1/3] Stopping services..."
     systemctl stop motor-control.service 2>/dev/null || true
     systemctl stop wifi-setup.service 2>/dev/null || true
+
     echo ""
-    echo "Starting services..."
+    echo "[2/3] Copying files..."
+    mkdir -p "$INSTALL_DIR"
+    cp "$SCRIPT_DIR/motor_control.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/motor_only.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/motor_configs.json" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/lcd_display.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/touch_screen.py" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR"/*.py
+
+    echo ""
+    echo "[3/3] Starting services..."
     systemctl start wifi-setup.service
     systemctl start motor-control.service
+
     echo ""
-    echo "Done."
-    echo ""
-    echo "Commands:"
-    echo "  View logs:  journalctl -u motor-control -f"
-    echo "  Status:     systemctl status motor-control"
+    echo "Done. View logs: journalctl -u motor-control -f"
     echo ""
     exit 0
 fi
