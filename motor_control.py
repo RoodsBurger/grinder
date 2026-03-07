@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Import display and touch drivers
 from lcd_display import LCD_1inch28
-from touch_screen import TouchScreen
+from touch_screen import TouchScreen, GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT
 
 # Pre-seed random for consistent icon rendering
 random.seed(42)
@@ -221,6 +221,7 @@ def main():
             print("WARNING: Touch controller not responding - UI will show but touch won't work")
 
     rpm = 200
+    current_screen = 0  # 0 = RPM screen (more screens added progressively)
     motor_proc = None
     last_activity_time = time.time()
     is_standby = False
@@ -238,7 +239,7 @@ def main():
                         disp.sleep_display()
                         is_standby = True
 
-                # Check for touch
+                # Check for touch or gesture event
                 if touch.is_touched():
                     if touch.read_touch():
                         # Wake from standby if needed
@@ -250,8 +251,17 @@ def main():
                             time.sleep(0.2)  # Debounce wake touch
                             continue
 
-                        # Normal operation - update activity time
                         last_activity_time = current_time
+
+                        # Hardware gesture → switch screen
+                        gesture = touch.get_gesture()
+                        if gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT):
+                            current_screen = 1 - current_screen
+                            print(f"Screen: {current_screen}")
+                            # placeholder - screen 1 UI drawn in next step
+                            draw_ui(disp, rpm, is_running=(motor_proc is not None))
+                            time.sleep(0.2)
+                            continue
 
                         x, y = touch.get_point()
                         action = map_touch(x, y, debug=False)

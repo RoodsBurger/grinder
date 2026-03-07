@@ -1,11 +1,32 @@
 """
 CST816T Touch Controller Driver
 I2C interface for touchscreen
+
+Modes:
+  0 - Gesture only  (0xFA=0x11, 0xEC=0x01)
+  1 - Point only    (0xFA=0x41)
+  2 - Mixed         (0xFA=0x71)  <- we use this: gestures + coordinates together
+
+Gesture IDs (register 0x01):
+  0x00 - None
+  0x01 - Swipe Up
+  0x02 - Swipe Down
+  0x03 - Swipe Left
+  0x04 - Swipe Right
+  0x05 - Long Press
 """
 import time
 import math
 import smbus2
 import RPi.GPIO as GPIO
+
+# Gesture constants
+GESTURE_NONE        = 0x00
+GESTURE_SWIPE_UP    = 0x01
+GESTURE_SWIPE_DOWN  = 0x02
+GESTURE_SWIPE_LEFT  = 0x03
+GESTURE_SWIPE_RIGHT = 0x04
+GESTURE_LONG_PRESS  = 0x05
 
 class TouchScreen:
     def __init__(self):
@@ -22,18 +43,18 @@ class TouchScreen:
         self.x = 0
         self.y = 0
         self.touched = False
+        self.gesture = GESTURE_NONE
 
         # Touch filtering and debouncing
-        self.debounce_time = 0.01  # 10ms debounce for fast response
+        self.debounce_time = 0.01  # 10ms debounce
         self.last_touch_time = 0
-        self.hysteresis = 5  # pixels - ignore moves smaller than this
         self.last_x = 0
         self.last_y = 0
 
         # Touch state machine
-        self.STATE_IDLE = 0
-        self.STATE_PRESSED = 1
-        self.STATE_HELD = 2
+        self.STATE_IDLE     = 0
+        self.STATE_PRESSED  = 1
+        self.STATE_HELD     = 2
         self.STATE_RELEASED = 3
         self.touch_state = self.STATE_IDLE
         self.press_start_time = 0
@@ -45,19 +66,17 @@ class TouchScreen:
 
         # I2C retry configuration
         self.max_retries = 3
-        self.retry_delay = 0.001  # 1ms between retries
+        self.retry_delay = 0.001
 
     def init(self):
-        """Initialize touch controller with robust error handling."""
+        """Initialize touch controller in mixed mode (gestures + coordinates)."""
         try:
             GPIO.setmode(GPIO.BCM)
             GPIO.setwarnings(False)
 
-            # Setup pins
             GPIO.setup(self.TP_RST, GPIO.OUT)
             GPIO.setup(self.TP_INT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-            # Reset touch controller
             self.reset()
 
             time.sleep(0.1)
@@ -75,16 +94,18 @@ class TouchScreen:
                 if attempt < 4:
                     time.sleep(0.2)
 
-            if device_found:
-                try:
-                    self.read_revision()
-                except:
-                    pass
-                self.stop_sleep()
-                return True
-            else:
+            if not device_found:
                 print("ERROR: Touch controller not detected")
                 return False
+
+            try:
+                self.read_revision()
+            except:
+                pass
+
+            self.stop_sleep()
+            self.set_mode(2)  # Mixed mode: gestures + coordinates
+            return True
 
         except Exception as e:
             print(f"ERROR: Touch init failed: {e}")
@@ -93,15 +114,14 @@ class TouchScreen:
     def reset(self):
         """Hardware reset of touch controller"""
         GPIO.output(self.TP_RST, GPIO.LOW)
-        time.sleep(0.05)  # Longer reset pulse
+        time.sleep(0.05)
         GPIO.output(self.TP_RST, GPIO.HIGH)
-        time.sleep(0.2)  # More time for controller to boot
+        time.sleep(0.2)
 
     def who_am_i(self):
         """Check if touch controller is present"""
         try:
-            chip_id = self.bus.read_byte_data(self.i2c_addr, 0xA7)
-            return chip_id == 0xB5
+            return self.bus.read_byte_data(self.i2c_addr, 0xA7) == 0xB5
         except:
             return False
 
@@ -119,99 +139,64 @@ class TouchScreen:
         except:
             pass
 
-    def validate_coordinates(self, x, y):
+    def set_mode(self, mode):
         """
-        Validate touch coordinates are within display bounds.
-        CST816T can return invalid coordinates on noise/vibration.
-
-        Returns: (valid, x, y) tuple. If invalid, returns (False, 0, 0)
+        Set touch controller mode.
+          0 - Gesture only
+          1 - Point only
+          2 - Mixed (gestures + point coordinates)
         """
-        # Display is 240x240
-        if x < 0 or x >= 240 or y < 0 or y >= 240:
-            return False, 0, 0
-
-        # Check for common invalid values (all 0xFFF or 0x000)
-        if (x == 0 and y == 0) or (x >= 4095 or y >= 4095):
-            return False, 0, 0
-
-        return True, x, y
-
-    def filter_coordinates(self, x, y):
-        """
-        Apply moving average filter to reduce jitter.
-
-        Args: x, y - raw coordinates
-        Returns: (filtered_x, filtered_y)
-        """
-        # Add to history
-        self.x_history.append(x)
-        self.y_history.append(y)
-
-        # Keep only last N samples
-        if len(self.x_history) > self.filter_size:
-            self.x_history.pop(0)
-        if len(self.y_history) > self.filter_size:
-            self.y_history.pop(0)
-
-        # Calculate average
-        avg_x = sum(self.x_history) // len(self.x_history)
-        avg_y = sum(self.y_history) // len(self.y_history)
-
-        return avg_x, avg_y
-
-    def check_hysteresis(self, x, y):
-        """
-        Check if movement exceeds hysteresis threshold.
-        Prevents jitter from reporting tiny movements.
-
-        Returns: True if movement is significant, False if within hysteresis
-        """
-        dx = abs(x - self.last_x)
-        dy = abs(y - self.last_y)
-        dist = math.sqrt(dx*dx + dy*dy)
-
-        return dist >= self.hysteresis
+        try:
+            if mode == 1:
+                self.bus.write_byte_data(self.i2c_addr, 0xFA, 0x41)
+            elif mode == 2:
+                self.bus.write_byte_data(self.i2c_addr, 0xFA, 0x71)
+            else:  # mode 0
+                self.bus.write_byte_data(self.i2c_addr, 0xFA, 0x11)
+                self.bus.write_byte_data(self.i2c_addr, 0xEC, 0x01)
+        except Exception as e:
+            print(f"ERROR: Failed to set touch mode: {e}")
 
     def read_touch(self):
         """
-        Read touch coordinates with debouncing, filtering, and error handling.
+        Read gesture and touch coordinates.
+        Reads 6 bytes from register 0x01:
+          [0] gesture ID
+          [1] finger count
+          [2] x high byte
+          [3] x low byte
+          [4] y high byte
+          [5] y low byte
 
-        Returns: True if valid touch detected, False otherwise.
-        Updates self.x, self.y, self.touched with filtered coordinates.
+        Returns True if a touch point or gesture was detected.
+        Updates self.x, self.y, self.gesture.
         """
         current_time = time.time()
 
-        # Minimal debounce - only skip if called too rapidly
         if current_time - self.last_touch_time < self.debounce_time:
             return False
 
-        # Try reading with retry logic
         for attempt in range(self.max_retries):
             try:
-                # Read 6 bytes starting from register 0x02
-                data = self.bus.read_i2c_block_data(self.i2c_addr, 0x02, 6)
+                # Read gesture + finger count + coordinates in one shot
+                data = self.bus.read_i2c_block_data(self.i2c_addr, 0x01, 6)
 
-                # Number of touch points
-                num_points = data[0] & 0x0F
+                gesture_id  = data[0]
+                num_points  = data[1] & 0x0F
+                raw_x       = ((data[2] & 0x0F) << 8) | data[3]
+                raw_y       = ((data[4] & 0x0F) << 8) | data[5]
+
+                # Store gesture (caller reads via get_gesture())
+                self.gesture = gesture_id
 
                 if num_points > 0:
-                    # Extract X coordinate
-                    raw_x = ((data[1] & 0x0F) << 8) | data[2]
-                    # Extract Y coordinate
-                    raw_y = ((data[3] & 0x0F) << 8) | data[4]
-
-                    # Validate coordinates
                     valid, x, y = self.validate_coordinates(raw_x, raw_y)
-
                     if not valid:
-                        # Invalid data, likely noise/vibration
                         self.touched = False
-                        return False
+                        # Still return True if a gesture fired without valid coords
+                        return gesture_id != GESTURE_NONE
 
-                    # Apply filtering
                     filtered_x, filtered_y = self.filter_coordinates(x, y)
-
-                    # Update state
                     self.x = filtered_x
                     self.y = filtered_y
                     self.last_x = filtered_x
@@ -219,7 +204,6 @@ class TouchScreen:
                     self.touched = True
                     self.last_touch_time = current_time
 
-                    # State machine transition
                     if self.touch_state == self.STATE_IDLE:
                         self.touch_state = self.STATE_PRESSED
                         self.press_start_time = current_time
@@ -227,78 +211,79 @@ class TouchScreen:
                         self.touch_state = self.STATE_HELD
 
                     return True
+
                 else:
-                    # No touch detected
+                    # No touch point - but may still have a gesture
                     if self.touch_state != self.STATE_IDLE:
                         self.touch_state = self.STATE_RELEASED
-                        # Clear filter history on release
                         self.x_history.clear()
                         self.y_history.clear()
-
                     self.touched = False
+
+                    if gesture_id != GESTURE_NONE:
+                        self.last_touch_time = current_time
+                        return True  # gesture without contact point
+
                     return False
 
-            except OSError as e:
-                # I2C error - retry
+            except OSError:
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
                     continue
-                else:
-                    # All retries failed - silently fail (normal during no-touch)
-                    self.touched = False
-                    return False
+                self.touched = False
+                return False
             except Exception as e:
-                # Unexpected error - report only
                 print(f"ERROR: Touch read exception: {e}")
                 self.touched = False
                 return False
 
         return False
 
+    def validate_coordinates(self, x, y):
+        """Validate coordinates are within display bounds."""
+        if x < 0 or x >= 240 or y < 0 or y >= 240:
+            return False, 0, 0
+        if (x == 0 and y == 0) or (x >= 4095 or y >= 4095):
+            return False, 0, 0
+        return True, x, y
+
+    def filter_coordinates(self, x, y):
+        """3-sample moving average to reduce jitter."""
+        self.x_history.append(x)
+        self.y_history.append(y)
+        if len(self.x_history) > self.filter_size:
+            self.x_history.pop(0)
+        if len(self.y_history) > self.filter_size:
+            self.y_history.pop(0)
+        return sum(self.x_history) // len(self.x_history), \
+               sum(self.y_history) // len(self.y_history)
+
     def get_point(self):
-        """Get current touch point"""
+        """Return current touch coordinates."""
         return self.x, self.y
 
+    def get_gesture(self):
+        """
+        Return the current gesture ID and clear it.
+        Use the GESTURE_* constants to check the value.
+        """
+        g = self.gesture
+        self.gesture = GESTURE_NONE
+        return g
+
     def is_touched(self):
-        """Check if screen is currently touched"""
+        """Check interrupt pin — LOW means touch or gesture event pending."""
         return GPIO.input(self.TP_INT) == GPIO.LOW
 
-    def get_touch_state(self):
-        """
-        Get current touch state.
-        Returns: STATE_IDLE, STATE_PRESSED, STATE_HELD, or STATE_RELEASED
-        """
-        # Reset released state to idle after reading
-        if self.touch_state == self.STATE_RELEASED:
-            self.touch_state = self.STATE_IDLE
-            return self.STATE_RELEASED
-
-        return self.touch_state
-
-    def get_touch_duration(self):
-        """
-        Get duration of current touch in seconds.
-        Returns: 0 if not touched, otherwise duration since press.
-        """
-        if self.touch_state in [self.STATE_PRESSED, self.STATE_HELD]:
-            return time.time() - self.press_start_time
-        return 0
-
     def is_new_press(self):
-        """
-        Check if this is a new press (just transitioned from IDLE to PRESSED).
-        Useful for button clicks vs. drag detection.
-
-        Returns: True if newly pressed in this read cycle.
-        """
+        """True only on the first frame of a touch (IDLE → PRESSED transition)."""
         return self.touch_state == self.STATE_PRESSED
 
     def cleanup(self):
-        """Clean up resources"""
+        """Clean up resources."""
         try:
             if self.bus:
                 self.bus.close()
-            # Reset pins to input (don't call GPIO.cleanup - other components use GPIO)
             GPIO.setup(self.TP_RST, GPIO.IN)
             GPIO.setup(self.TP_INT, GPIO.IN)
         except:
