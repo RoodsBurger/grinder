@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# Simple Install Script for Motor Control + WiFi Setup
+# Install Script for Motor Control + WiFi Setup
 # Run as root: sudo bash install.sh
+#
+# Flags:
+#   (none)   Full install: deps, copy files, services
+#   -simple  Just restart services (no install, no file copy)
 #
 
 set -e
-
-echo "=========================================="
-echo "Motor Control + WiFi Setup Installer"
-echo "=========================================="
 
 if [ "$EUID" -ne 0 ]; then
     echo "ERROR: Please run as root (sudo bash install.sh)"
@@ -17,6 +17,34 @@ fi
 
 INSTALL_DIR="/opt/motor-control"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- SIMPLE MODE: just restart services ---
+if [ "$1" == "-simple" ]; then
+    echo "=========================================="
+    echo "Restarting Services"
+    echo "=========================================="
+    echo ""
+    echo "Stopping services..."
+    systemctl stop motor-control.service 2>/dev/null || true
+    systemctl stop wifi-setup.service 2>/dev/null || true
+    echo ""
+    echo "Starting services..."
+    systemctl start wifi-setup.service
+    systemctl start motor-control.service
+    echo ""
+    echo "Done."
+    echo ""
+    echo "Commands:"
+    echo "  View logs:  journalctl -u motor-control -f"
+    echo "  Status:     systemctl status motor-control"
+    echo ""
+    exit 0
+fi
+
+# --- FULL INSTALL ---
+echo "=========================================="
+echo "Motor Control + WiFi Setup Installer"
+echo "=========================================="
 
 echo ""
 echo "[1/7] Installing Python dependencies..."
@@ -61,8 +89,6 @@ echo ""
 echo "[7/7] Starting services..."
 systemctl start wifi-setup.service
 systemctl start motor-control.service
-# sudo systemctl stop motor-control.service
-
 
 echo ""
 echo "=========================================="
