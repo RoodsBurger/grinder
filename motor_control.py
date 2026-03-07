@@ -58,9 +58,9 @@ COL_AMBER_SOFT = (110, 65, 0)
 COL_AMBER_LOCKED = (80, 70, 50)
 
 # Feed control range
-MIN_FEED_TIME = 0.5   # seconds
-MAX_FEED_TIME = 5.0   # at max, gate stays permanently open
-FEED_STEP     = 0.5
+MIN_FEED_TIME = 0.1   # seconds
+MAX_FEED_TIME = 1.0   # at max, gate stays permanently open
+FEED_STEP     = 0.1
 
 # Touch interaction
 KNOB_HIT_RADIUS = 38   # px (real coords) - must press within this distance of knob
@@ -398,7 +398,7 @@ def main():
             print("WARNING: Touch controller not responding - UI will show but touch won't work")
 
     rpm = 200
-    feed_open_time = 2.0  # seconds (screen 1)
+    feed_open_time = 0.1  # seconds (screen 1)
     current_screen = 0
     motor_proc = None
     servo_proc = None
