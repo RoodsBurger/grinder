@@ -300,7 +300,7 @@ def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1)
 
     # Feed time label
     if CACHED_FONT:
-        label = "always open" if feed_time >= MAX_FEED_TIME else f"{feed_time:.1f}s open"
+        label = "∞" if feed_time >= MAX_FEED_TIME else f"{feed_time:.1f}s"
         draw.text((CENTER[0], CENTER[1] + 70*SCALE), label,
                  font=CACHED_FONT, fill=(180, 110, 30), anchor="mm")
 
