@@ -56,6 +56,8 @@ COL_TEXT = (255, 255, 255)
 KNOB_HIT_RADIUS = 28   # px (real coords) - must press within this distance of knob
 KNOB_HOLD_TIME  = 1.0  # seconds to hold on knob before drag activates
 BUTTON_MAX_TAP  = 0.5  # seconds - button press longer than this is ignored
+RELEASE_TIMEOUT = 0.15 # seconds of no touch events before treating as finger-lift
+                       # (INT pin pulses in mixed mode rather than staying LOW)
 
 # Interaction states
 INTERACT_IDLE         = 0
@@ -256,7 +258,8 @@ def main():
     # Touch interaction state machine
     interact_state = INTERACT_IDLE
     interact_start_time = 0
-    was_touching = False          # tracks finger-down so we can detect lift
+    was_touching = False          # True once first touch event classified
+    last_touch_event_time = 0    # time of most recent touch read — used for release timeout
     gesture_cooldown_until = 0
 
     draw_ui(disp, rpm, is_running=False)
@@ -272,11 +275,10 @@ def main():
                         disp.sleep_display()
                         is_standby = True
 
-                currently_touched = touch.is_touched()
-
-                # ── FINGER DOWN ─────────────────────────────────────────────
-                if currently_touched:
+                # ── TOUCH EVENT (INT pin pulsed LOW) ────────────────────────
+                if touch.is_touched():
                     if touch.read_touch():
+                        last_touch_event_time = current_time
 
                         # Wake from standby
                         if is_standby:
@@ -286,71 +288,85 @@ def main():
                             interact_state = INTERACT_IDLE
                             was_touching = False
                             draw_ui(disp, rpm, is_running=(motor_proc is not None))
+                            print("TOUCH: Wake from standby")
                             time.sleep(0.2)
                             continue
 
                         last_activity_time = current_time
 
-                        # Hardware gesture → switch screen (consumes the event)
+                        # Hardware gesture → switch screen
                         gesture = touch.get_gesture()
                         if gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT):
+                            direction = "LEFT" if gesture == GESTURE_SWIPE_LEFT else "RIGHT"
                             current_screen = 1 - current_screen
                             gesture_cooldown_until = current_time + 0.4
                             interact_state = INTERACT_IDLE
                             was_touching = False
-                            print(f"Screen: {current_screen}")
+                            print(f"GESTURE: Swipe {direction} → screen {current_screen}")
                             draw_ui(disp, rpm, is_running=(motor_proc is not None))
                             continue
 
-                        # Gesture cooldown: drop any trailing touch reads
+                        # Drop trailing reads after a gesture
                         if current_time < gesture_cooldown_until:
+                            print("TOUCH: Gesture cooldown, ignoring")
                             was_touching = True
                             continue
 
                         x, y = touch.get_point()
 
-                        # ── First contact: classify the touch ────────────────
+                        # ── First contact this gesture ───────────────────────
                         if not was_touching:
                             was_touching = True
                             interact_start_time = current_time
 
                             if is_on_button(x, y):
                                 interact_state = INTERACT_BUTTON
+                                print(f"TOUCH: Button pressed at ({x},{y})")
 
                             elif is_on_knob(x, y, rpm) and motor_proc is None:
                                 interact_state = INTERACT_KNOB_WAITING
+                                print(f"TOUCH: Knob pressed at ({x},{y}), hold {KNOB_HOLD_TIME}s to activate")
                                 draw_ui(disp, rpm, is_running=False,
                                         knob_color=COL_KNOB_WAITING)
 
                             else:
                                 interact_state = INTERACT_IDLE
+                                print(f"TOUCH: Ignored at ({x},{y}) — not on knob or button")
 
-                        # ── Ongoing hold / drag ──────────────────────────────
+                        # ── Continuing hold / drag ───────────────────────────
                         else:
                             hold_time = current_time - interact_start_time
 
                             if interact_state == INTERACT_KNOB_WAITING:
                                 if hold_time >= KNOB_HOLD_TIME:
-                                    # Hold confirmed — activate drag
                                     interact_state = INTERACT_KNOB_ACTIVE
+                                    print(f"TOUCH: Knob ACTIVE after {hold_time:.2f}s hold")
                                     draw_ui(disp, rpm, is_running=False,
                                             knob_color=COL_KNOB_ACTIVE)
+                                else:
+                                    print(f"TOUCH: Knob waiting ({hold_time:.2f}s / {KNOB_HOLD_TIME}s)")
 
                             elif interact_state == INTERACT_KNOB_ACTIVE:
                                 new_rpm = arc_to_rpm(x, y)
                                 if new_rpm is not None and new_rpm != rpm:
+                                    print(f"TOUCH: Drag → RPM {rpm} → {new_rpm}")
                                     rpm = new_rpm
                                     draw_ui(disp, rpm, is_running=False,
                                             knob_color=COL_KNOB_ACTIVE)
 
-                # ── FINGER LIFTED ────────────────────────────────────────────
-                elif was_touching:
+                            elif interact_state == INTERACT_BUTTON:
+                                hold_time = current_time - interact_start_time
+                                print(f"TOUCH: Button held ({hold_time:.2f}s)")
+
+                # ── RELEASE: no touch event for RELEASE_TIMEOUT ──────────────
+                if was_touching and (current_time - last_touch_event_time) > RELEASE_TIMEOUT:
+                    hold_time = last_touch_event_time - interact_start_time
+                    print(f"TOUCH: Released — state={interact_state}, hold={hold_time:.2f}s")
                     was_touching = False
-                    hold_time = current_time - interact_start_time
 
                     if interact_state == INTERACT_BUTTON:
-                        # Only act on short taps — long press does nothing
                         if hold_time <= BUTTON_MAX_TAP:
+                            print("TOUCH: Button tap → toggle motor")
                             if motor_proc is None:
                                 draw_ui(disp, rpm, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
@@ -358,9 +374,11 @@ def main():
                                 stop_motor_process(motor_proc, disp)
                                 motor_proc = None
                                 draw_ui(disp, rpm, is_running=False)
+                        else:
+                            print(f"TOUCH: Button long-press ({hold_time:.2f}s) — ignored")
 
                     elif interact_state in (INTERACT_KNOB_WAITING, INTERACT_KNOB_ACTIVE):
-                        # Restore normal knob colour on release
+                        print("TOUCH: Knob released — restoring normal colour")
                         draw_ui(disp, rpm, is_running=(motor_proc is not None))
 
                     interact_state = INTERACT_IDLE
