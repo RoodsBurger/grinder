@@ -44,8 +44,10 @@ END_ANGLE = 405
 COL_BG = (10, 10, 15)
 COL_TRACK = (40, 44, 52)
 COL_ACTIVE = (0, 122, 255)
+COL_ACTIVE_SOFT = (0, 60, 130)   # dimmed arc when idle/not grabbed
 COL_ACTIVE_LOCKED = (60, 70, 80)
 COL_KNOB = (255, 255, 255)
+COL_KNOB_SOFT = (160, 160, 170)  # dimmed knob when idle/not grabbed
 COL_KNOB_WAITING = (255, 165, 0)   # orange - press detected, keep holding
 COL_KNOB_ACTIVE = (100, 220, 100)  # green - drag is live
 COL_BTN_GO = (46, 204, 113)
@@ -53,7 +55,7 @@ COL_BTN_STOP = (231, 76, 60)
 COL_TEXT = (255, 255, 255)
 
 # Touch interaction
-KNOB_HIT_RADIUS = 28   # px (real coords) - must press within this distance of knob
+KNOB_HIT_RADIUS = 38   # px (real coords) - must press within this distance of knob
 KNOB_HOLD_TIME  = 1.0  # seconds to hold on knob before drag activates
 BUTTON_MAX_TAP  = 0.5  # seconds - button press longer than this is ignored
 BUTTON_RELEASE_TIMEOUT = 0.08  # 80ms — fast tap response for button
@@ -146,10 +148,14 @@ def arc_to_rpm(x, y):
         return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / 10) * 10)
     return None
 
-def draw_ui(disp, rpm, is_running, knob_color=None):
-    """Draws the UI at 2x resolution. knob_color overrides the default knob colour."""
+def draw_ui(disp, rpm, is_running, knob_color=None, highlight=False):
+    """Draws the UI at 2x resolution.
+    highlight=False → soft arc + soft knob (idle state)
+    highlight=True  → bright arc + bright knob (grabbed / waiting)
+    knob_color overrides the knob colour when set explicitly.
+    """
     if knob_color is None:
-        knob_color = COL_KNOB
+        knob_color = COL_KNOB if highlight else COL_KNOB_SOFT
 
     img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
     draw = ImageDraw.Draw(img)
@@ -159,9 +165,14 @@ def draw_ui(disp, rpm, is_running, knob_color=None):
             CENTER[0]+RADIUS_OUTER, CENTER[1]+RADIUS_OUTER]
     draw.pieslice(bbox, start=START_ANGLE, end=END_ANGLE, fill=COL_TRACK)
 
-    fill_col = COL_ACTIVE_LOCKED if is_running else COL_ACTIVE
     ratio = (rpm - MIN_RPM) / (MAX_RPM - MIN_RPM) if MAX_RPM > MIN_RPM else 0
     active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
+    if is_running:
+        fill_col = COL_ACTIVE_LOCKED
+    elif highlight:
+        fill_col = COL_ACTIVE
+    else:
+        fill_col = COL_ACTIVE_SOFT
     draw.pieslice(bbox, start=START_ANGLE, end=active_angle, fill=fill_col)
 
     # Center hole
@@ -328,7 +339,7 @@ def main():
                                 interact_state = INTERACT_KNOB_WAITING
                                 print(f"TOUCH: Knob pressed at ({x},{y}), hold {KNOB_HOLD_TIME}s to activate")
                                 draw_ui(disp, rpm, is_running=False,
-                                        knob_color=COL_KNOB_WAITING)
+                                        knob_color=COL_KNOB_WAITING, highlight=True)
 
                             else:
                                 interact_state = INTERACT_IDLE
@@ -343,7 +354,7 @@ def main():
                                     interact_state = INTERACT_KNOB_ACTIVE
                                     print(f"TOUCH: Knob ACTIVE after {hold_time:.2f}s hold")
                                     draw_ui(disp, rpm, is_running=False,
-                                            knob_color=COL_KNOB_ACTIVE)
+                                            knob_color=COL_KNOB_ACTIVE, highlight=True)
                                 else:
                                     print(f"TOUCH: Knob waiting ({hold_time:.2f}s / {KNOB_HOLD_TIME}s)")
 
@@ -353,7 +364,7 @@ def main():
                                     print(f"TOUCH: Drag → RPM {rpm} → {new_rpm}")
                                     rpm = new_rpm
                                     draw_ui(disp, rpm, is_running=False,
-                                            knob_color=COL_KNOB_ACTIVE)
+                                            knob_color=COL_KNOB_ACTIVE, highlight=True)
 
                             elif interact_state == INTERACT_BUTTON:
                                 hold_time = current_time - interact_start_time
