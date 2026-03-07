@@ -59,7 +59,7 @@ COL_AMBER_LOCKED = (80, 70, 50)
 
 # Feed control range
 MIN_FEED_TIME = 0.5   # seconds
-MAX_FEED_TIME = 8.0
+MAX_FEED_TIME = 5.0   # at max, gate stays permanently open
 FEED_STEP     = 0.5
 
 # Touch interaction
@@ -300,7 +300,8 @@ def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1)
 
     # Feed time label
     if CACHED_FONT:
-        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{feed_time:.1f}s open",
+        label = "always open" if feed_time >= MAX_FEED_TIME else f"{feed_time:.1f}s open"
+        draw.text((CENTER[0], CENTER[1] + 70*SCALE), label,
                  font=CACHED_FONT, fill=(180, 110, 30), anchor="mm")
 
     draw_nav_dots(draw, current_screen)
@@ -515,7 +516,9 @@ def main():
                             if motor_proc is None:
                                 redraw(disp, current_screen, rpm, feed_open_time, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
-                                servo_proc = start_servo_process(feed_open_time)
+                                # 0 = always open sentinel
+                                servo_open = 0.0 if feed_open_time >= MAX_FEED_TIME else feed_open_time
+                                servo_proc = start_servo_process(servo_open)
                             else:
                                 stop_all_processes(motor_proc, servo_proc, disp)
                                 motor_proc = None

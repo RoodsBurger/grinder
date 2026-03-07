@@ -51,28 +51,34 @@ def main():
     factory = LGPIOFactory()
     servo = Servo(SERVO_PIN, pin_factory=factory)
 
-    # Start closed
-    servo.value = -1.0
-    time.sleep(SERVO_SETTLE)
-    servo.value = None  # cut PWM to prevent jitter
+    always_open = (open_time <= 0)
 
-    print(f"Servo ready: open={open_time:.1f}s  closed={CLOSED_TIME:.1f}s", flush=True)
-
-    while not shutdown_requested:
-        # Open gate
+    if always_open:
+        # Gate stays open permanently until shutdown
         servo.value = 1.0
-        wait(open_time)
-
-        if shutdown_requested:
-            break
-
-        # Close gate
+        while not shutdown_requested:
+            time.sleep(0.1)
+    else:
+        # Start closed
         servo.value = -1.0
         time.sleep(SERVO_SETTLE)
-        servo.value = None  # cut PWM
+        servo.value = None  # cut PWM to prevent jitter
 
-        # Wait remaining closed time
-        wait(CLOSED_TIME - SERVO_SETTLE)
+        while not shutdown_requested:
+            # Open gate
+            servo.value = 1.0
+            wait(open_time)
+
+            if shutdown_requested:
+                break
+
+            # Close gate
+            servo.value = -1.0
+            time.sleep(SERVO_SETTLE)
+            servo.value = None  # cut PWM
+
+            # Wait remaining closed time
+            wait(CLOSED_TIME - SERVO_SETTLE)
 
     # Graceful shutdown: ensure gate is closed
     servo.value = -1.0
