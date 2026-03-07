@@ -17,7 +17,7 @@ random.seed(42)
 SLEEP_PIN = 7
 
 # --- CONFIGURATION ---
-MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (8000mA, 100kHz PWM, 1/64 step)
+MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (6500mA, 100kHz PWM, 1/64 step)
 MIN_RPM = 0
 MAX_RPM = 300
 STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
