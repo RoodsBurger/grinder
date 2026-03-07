@@ -44,15 +44,23 @@ END_ANGLE = 405
 COL_BG = (10, 10, 15)
 COL_TRACK = (40, 44, 52)
 COL_ACTIVE = (0, 122, 255)
-COL_ACTIVE_SOFT = (0, 60, 130)   # dimmed arc when idle/not grabbed
-COL_ACTIVE_LOCKED = (60, 70, 80)
-COL_KNOB = (255, 255, 255)
-COL_KNOB_SOFT = (160, 160, 170)  # dimmed knob when idle/not grabbed
-COL_KNOB_WAITING = (255, 165, 0)   # orange - press detected, keep holding
-COL_KNOB_ACTIVE = (100, 220, 100)  # green - drag is live
+COL_ACTIVE_SOFT   = (0, 60, 130)    # dimmed blue arc (idle)
+COL_ACTIVE_LOCKED = (60, 70, 80)    # locked blue arc (running)
+COL_KNOB      = (255, 255, 255)
+COL_KNOB_SOFT = (160, 160, 170)     # dimmed knob (idle)
 COL_BTN_GO = (46, 204, 113)
 COL_BTN_STOP = (231, 76, 60)
 COL_TEXT = (255, 255, 255)
+
+# Amber palette for screen 1 (feed control)
+COL_AMBER = (230, 140, 0)
+COL_AMBER_SOFT = (110, 65, 0)
+COL_AMBER_LOCKED = (80, 70, 50)
+
+# Feed control range
+MIN_FEED_TIME = 0.5   # seconds
+MAX_FEED_TIME = 8.0
+FEED_STEP     = 0.5
 
 # Touch interaction
 KNOB_HIT_RADIUS = 38   # px (real coords) - must press within this distance of knob
@@ -148,14 +156,52 @@ def arc_to_rpm(x, y):
         return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / 10) * 10)
     return None
 
-def draw_ui(disp, rpm, is_running, knob_color=None, highlight=False):
-    """Draws the UI at 2x resolution.
-    highlight=False → soft arc + soft knob (idle state)
-    highlight=True  → bright arc + bright knob (grabbed / waiting)
-    knob_color overrides the knob colour when set explicitly.
+# --- FEED SCREEN HELPERS ---
+
+def get_feed_knob_pos(feed_time):
+    """Return feed knob center in real (1x) coordinates."""
+    ratio = (feed_time - MIN_FEED_TIME) / (MAX_FEED_TIME - MIN_FEED_TIME)
+    active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
+    knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2 / SCALE
+    rad = math.radians(active_angle)
+    return (W_REAL // 2 + knob_dist * math.cos(rad),
+            H_REAL // 2 + knob_dist * math.sin(rad))
+
+def is_on_feed_knob(x, y, feed_time):
+    kx, ky = get_feed_knob_pos(feed_time)
+    return math.sqrt((x - kx)**2 + (y - ky)**2) < KNOB_HIT_RADIUS
+
+def arc_to_feed_time(x, y):
+    """Convert touch to snapped feed-time value, or None if outside arc zone."""
+    dx, dy = x - W_REAL // 2, y - H_REAL // 2
+    if math.sqrt(dx*dx + dy*dy) < 45:
+        return None
+    angle = get_angle(x, y)
+    eff_angle = angle if angle >= 135 else angle + 360
+    if 135 <= eff_angle <= 405:
+        ratio = (eff_angle - 135) / 270
+        raw = MIN_FEED_TIME + ratio * (MAX_FEED_TIME - MIN_FEED_TIME)
+        snapped = round(raw / FEED_STEP) * FEED_STEP
+        return max(MIN_FEED_TIME, min(MAX_FEED_TIME, snapped))
+    return None
+
+def draw_nav_dots(draw, active_screen, num_screens=2):
+    """Two small dots at the bottom indicating active screen."""
+    dot_y = int(218 * SCALE)
+    spacing = int(10 * SCALE)
+    dot_r = int(3 * SCALE)
+    start_x = CENTER[0] - ((num_screens - 1) * spacing) // 2
+    for i in range(num_screens):
+        x = start_x + i * spacing
+        col = (220, 220, 220) if i == active_screen else (60, 60, 70)
+        draw.ellipse([x - dot_r, dot_y - dot_r, x + dot_r, dot_y + dot_r], fill=col)
+
+def draw_ui(disp, rpm, is_running, highlight=False, current_screen=0):
+    """Screen 0: RPM control (blue arc).
+    highlight=False → soft arc + gray knob (idle)
+    highlight=True  → bright arc + white knob (grabbed)
     """
-    if knob_color is None:
-        knob_color = COL_KNOB if highlight else COL_KNOB_SOFT
+    knob_color = COL_KNOB if highlight else COL_KNOB_SOFT
 
     img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
     draw = ImageDraw.Draw(img)
@@ -202,7 +248,70 @@ def draw_ui(disp, rpm, is_running, knob_color=None, highlight=False):
         draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm // 2} RPM",
                  font=CACHED_FONT, fill=(150, 150, 150), anchor="mm")
 
+    draw_nav_dots(draw, current_screen)
     disp.show_image(img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS))
+
+def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1):
+    """Screen 1: Feed open-time control (amber arc)."""
+    knob_color = COL_KNOB if highlight else COL_KNOB_SOFT
+
+    img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
+    draw = ImageDraw.Draw(img)
+
+    # Track
+    bbox = [CENTER[0]-RADIUS_OUTER, CENTER[1]-RADIUS_OUTER,
+            CENTER[0]+RADIUS_OUTER, CENTER[1]+RADIUS_OUTER]
+    draw.pieslice(bbox, start=START_ANGLE, end=END_ANGLE, fill=COL_TRACK)
+
+    # Active arc (amber)
+    ratio = (feed_time - MIN_FEED_TIME) / (MAX_FEED_TIME - MIN_FEED_TIME)
+    active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
+    if is_running:
+        fill_col = COL_AMBER_LOCKED
+    elif highlight:
+        fill_col = COL_AMBER
+    else:
+        fill_col = COL_AMBER_SOFT
+    draw.pieslice(bbox, start=START_ANGLE, end=active_angle, fill=fill_col)
+
+    # Center hole
+    mask_bbox = [CENTER[0]-RADIUS_INNER, CENTER[1]-RADIUS_INNER,
+                 CENTER[0]+RADIUS_INNER, CENTER[1]+RADIUS_INNER]
+    draw.ellipse(mask_bbox, fill=COL_BG)
+
+    # Knob (when stopped)
+    if not is_running:
+        knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2
+        rad = math.radians(active_angle)
+        kx = CENTER[0] + knob_dist * math.cos(rad)
+        ky = CENTER[1] + knob_dist * math.sin(rad)
+        draw.ellipse([kx-KNOB_RADIUS, ky-KNOB_RADIUS, kx+KNOB_RADIUS, ky+KNOB_RADIUS],
+                     fill=knob_color)
+
+    # Button (same green/red)
+    btn_col = COL_BTN_STOP if is_running else COL_BTN_GO
+    draw.ellipse([CENTER[0]-BUTTON_RADIUS, CENTER[1]-BUTTON_RADIUS,
+                  CENTER[0]+BUTTON_RADIUS, CENTER[1]+BUTTON_RADIUS], fill=btn_col)
+
+    # Icon (reuse bean icons)
+    icon = ICON_STOP if is_running else ICON_START
+    if icon:
+        img.paste(icon, (CENTER[0] - ICON_SIZE, CENTER[1] - ICON_SIZE), icon)
+
+    # Feed time label
+    if CACHED_FONT:
+        draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{feed_time:.1f}s open",
+                 font=CACHED_FONT, fill=(180, 110, 30), anchor="mm")
+
+    draw_nav_dots(draw, current_screen)
+    disp.show_image(img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS))
+
+def redraw(disp, screen, rpm, feed_time, is_running, highlight=False):
+    """Dispatch draw to the correct screen function."""
+    if screen == 0:
+        draw_ui(disp, rpm, is_running, highlight=highlight, current_screen=screen)
+    else:
+        draw_feed_ui(disp, feed_time, is_running, highlight=highlight, current_screen=screen)
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
@@ -261,7 +370,8 @@ def main():
             print("WARNING: Touch controller not responding - UI will show but touch won't work")
 
     rpm = 200
-    current_screen = 0   # 0 = RPM screen (more screens added progressively)
+    feed_open_time = 2.0  # seconds (screen 1)
+    current_screen = 0
     motor_proc = None
     last_activity_time = time.time()
     is_standby = False
@@ -298,7 +408,8 @@ def main():
                             last_activity_time = current_time
                             interact_state = INTERACT_IDLE
                             was_touching = False
-                            draw_ui(disp, rpm, is_running=(motor_proc is not None))
+                            redraw(disp, current_screen, rpm, feed_open_time,
+                                   is_running=(motor_proc is not None))
                             print("TOUCH: Wake from standby")
                             time.sleep(0.2)
                             continue
@@ -321,7 +432,8 @@ def main():
                             interact_state = INTERACT_IDLE
                             was_touching = False
                             print(f"GESTURE: Swipe {direction} → screen {current_screen}")
-                            draw_ui(disp, rpm, is_running=(motor_proc is not None))
+                            redraw(disp, current_screen, rpm, feed_open_time,
+                                   is_running=(motor_proc is not None))
                             continue
 
                         x, y = touch.get_point()
@@ -335,14 +447,17 @@ def main():
                                 interact_state = INTERACT_BUTTON
                                 print(f"TOUCH: Button pressed at ({x},{y})")
 
-                            elif is_on_knob(x, y, rpm) and motor_proc is None:
-                                interact_state = INTERACT_KNOB_WAITING
-                                print(f"TOUCH: Knob pressed at ({x},{y}), hold {KNOB_HOLD_TIME}s to activate")
-                                draw_ui(disp, rpm, is_running=False, highlight=True)
-
                             else:
-                                interact_state = INTERACT_IDLE
-                                print(f"TOUCH: Ignored at ({x},{y}) — not on knob or button")
+                                on_knob = (is_on_knob(x, y, rpm) if current_screen == 0
+                                           else is_on_feed_knob(x, y, feed_open_time))
+                                if on_knob and motor_proc is None:
+                                    interact_state = INTERACT_KNOB_WAITING
+                                    print(f"TOUCH: Knob pressed at ({x},{y}), hold {KNOB_HOLD_TIME}s to activate")
+                                    redraw(disp, current_screen, rpm, feed_open_time,
+                                           is_running=False, highlight=True)
+                                else:
+                                    interact_state = INTERACT_IDLE
+                                    print(f"TOUCH: Ignored at ({x},{y}) — not on knob or button")
 
                         # ── Continuing hold / drag ───────────────────────────
                         else:
@@ -352,19 +467,28 @@ def main():
                                 if hold_time >= KNOB_HOLD_TIME:
                                     interact_state = INTERACT_KNOB_ACTIVE
                                     print(f"TOUCH: Knob ACTIVE after {hold_time:.2f}s hold")
-                                    draw_ui(disp, rpm, is_running=False, highlight=True)
+                                    redraw(disp, current_screen, rpm, feed_open_time,
+                                           is_running=False, highlight=True)
                                 else:
                                     print(f"TOUCH: Knob waiting ({hold_time:.2f}s / {KNOB_HOLD_TIME}s)")
 
                             elif interact_state == INTERACT_KNOB_ACTIVE:
-                                new_rpm = arc_to_rpm(x, y)
-                                if new_rpm is not None and new_rpm != rpm:
-                                    print(f"TOUCH: Drag → RPM {rpm} → {new_rpm}")
-                                    rpm = new_rpm
-                                    draw_ui(disp, rpm, is_running=False, highlight=True)
+                                if current_screen == 0:
+                                    new_val = arc_to_rpm(x, y)
+                                    if new_val is not None and new_val != rpm:
+                                        print(f"TOUCH: Drag → RPM {rpm} → {new_val}")
+                                        rpm = new_val
+                                        redraw(disp, 0, rpm, feed_open_time,
+                                               is_running=False, highlight=True)
+                                else:
+                                    new_val = arc_to_feed_time(x, y)
+                                    if new_val is not None and new_val != feed_open_time:
+                                        print(f"TOUCH: Drag → Feed {feed_open_time:.1f}s → {new_val:.1f}s")
+                                        feed_open_time = new_val
+                                        redraw(disp, 1, rpm, feed_open_time,
+                                               is_running=False, highlight=True)
 
                             elif interact_state == INTERACT_BUTTON:
-                                hold_time = current_time - interact_start_time
                                 print(f"TOUCH: Button held ({hold_time:.2f}s)")
 
                 # ── RELEASE: no touch event for state-appropriate timeout ────
@@ -378,18 +502,19 @@ def main():
                         if hold_time <= BUTTON_MAX_TAP:
                             print("TOUCH: Button tap → toggle motor")
                             if motor_proc is None:
-                                draw_ui(disp, rpm, is_running=True)
+                                redraw(disp, current_screen, rpm, feed_open_time, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
                             else:
                                 stop_motor_process(motor_proc, disp)
                                 motor_proc = None
-                                draw_ui(disp, rpm, is_running=False)
+                                redraw(disp, current_screen, rpm, feed_open_time, is_running=False)
                         else:
                             print(f"TOUCH: Button long-press ({hold_time:.2f}s) — ignored")
 
                     elif interact_state in (INTERACT_KNOB_WAITING, INTERACT_KNOB_ACTIVE):
                         print("TOUCH: Knob released — restoring normal colour")
-                        draw_ui(disp, rpm, is_running=(motor_proc is not None))
+                        redraw(disp, current_screen, rpm, feed_open_time,
+                               is_running=(motor_proc is not None))
 
                     interact_state = INTERACT_IDLE
 
@@ -409,12 +534,11 @@ def main():
                     stop_motor_process(None, disp)
                     motor_proc = None
 
-                    # Wake display if in standby
                     if is_standby:
                         disp.wake_display()
                         is_standby = False
 
-                    draw_ui(disp, rpm, is_running=False)
+                    redraw(disp, current_screen, rpm, feed_open_time, is_running=False)
                     last_activity_time = current_time
                     time.sleep(0.5)
 
