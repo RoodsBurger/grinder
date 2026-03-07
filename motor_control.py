@@ -46,9 +46,22 @@ COL_TRACK = (40, 44, 52)
 COL_ACTIVE = (0, 122, 255)
 COL_ACTIVE_LOCKED = (60, 70, 80)
 COL_KNOB = (255, 255, 255)
+COL_KNOB_WAITING = (255, 165, 0)   # orange - press detected, keep holding
+COL_KNOB_ACTIVE = (100, 220, 100)  # green - drag is live
 COL_BTN_GO = (46, 204, 113)
 COL_BTN_STOP = (231, 76, 60)
 COL_TEXT = (255, 255, 255)
+
+# Touch interaction
+KNOB_HIT_RADIUS = 28   # px (real coords) - must press within this distance of knob
+KNOB_HOLD_TIME  = 1.0  # seconds to hold on knob before drag activates
+BUTTON_MAX_TAP  = 0.5  # seconds - button press longer than this is ignored
+
+# Interaction states
+INTERACT_IDLE         = 0
+INTERACT_KNOB_WAITING = 1  # pressed knob, waiting for hold
+INTERACT_KNOB_ACTIVE  = 2  # hold confirmed, dragging
+INTERACT_BUTTON       = 3  # pressed button, waiting for tap release
 
 # --- CACHED RESOURCES (populated at startup) ---
 CACHED_FONT = None
@@ -99,29 +112,43 @@ def get_angle(x, y):
     deg = math.degrees(math.atan2(dy, dx))
     return (deg + 360) % 360
 
-def map_touch(x, y, debug=False):
-    """Map touch to action: returns 'BUTTON', RPM integer, or None"""
-    dx, dy = x - (W_REAL // 2), y - (H_REAL // 2)
+def get_knob_pos(rpm):
+    """Return knob center in real (1x) display coordinates for the given RPM."""
+    ratio = (rpm - MIN_RPM) / (MAX_RPM - MIN_RPM) if MAX_RPM > MIN_RPM else 0
+    active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
+    knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2 / SCALE
+    rad = math.radians(active_angle)
+    return (W_REAL // 2 + knob_dist * math.cos(rad),
+            H_REAL // 2 + knob_dist * math.sin(rad))
+
+def is_on_knob(x, y, rpm):
+    """True if touch (x,y) lands within KNOB_HIT_RADIUS of the knob."""
+    kx, ky = get_knob_pos(rpm)
+    return math.sqrt((x - kx)**2 + (y - ky)**2) < KNOB_HIT_RADIUS
+
+def is_on_button(x, y):
+    """True if touch lands on the centre button."""
+    dx, dy = x - W_REAL // 2, y - H_REAL // 2
+    return math.sqrt(dx*dx + dy*dy) < BUTTON_TOUCH_RADIUS
+
+def arc_to_rpm(x, y):
+    """Convert touch position to snapped RPM value, or None if outside arc zone."""
+    dx, dy = x - W_REAL // 2, y - H_REAL // 2
     dist = math.sqrt(dx*dx + dy*dy)
-
-    if dist < BUTTON_TOUCH_RADIUS:
-        return "BUTTON"
-
-    if dist < 45:  # Dead zone
+    if dist < 45:
         return None
-
     angle = get_angle(x, y)
     eff_angle = angle if angle >= 135 else angle + 360
-
     if 135 <= eff_angle <= 405:
         ratio = (eff_angle - 135) / 270
-        rpm_value = MIN_RPM + ratio * (MAX_RPM - MIN_RPM)
-        return int(round(rpm_value / 10) * 10)
-
+        return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / 10) * 10)
     return None
 
-def draw_ui(disp, rpm, is_running):
-    """Draws the UI at 2x resolution with cached resources"""
+def draw_ui(disp, rpm, is_running, knob_color=None):
+    """Draws the UI at 2x resolution. knob_color overrides the default knob colour."""
+    if knob_color is None:
+        knob_color = COL_KNOB
+
     img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
     draw = ImageDraw.Draw(img)
 
@@ -131,7 +158,7 @@ def draw_ui(disp, rpm, is_running):
     draw.pieslice(bbox, start=START_ANGLE, end=END_ANGLE, fill=COL_TRACK)
 
     fill_col = COL_ACTIVE_LOCKED if is_running else COL_ACTIVE
-    ratio = (rpm - MIN_RPM) / (MAX_RPM - MIN_RPM)
+    ratio = (rpm - MIN_RPM) / (MAX_RPM - MIN_RPM) if MAX_RPM > MIN_RPM else 0
     active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
     draw.pieslice(bbox, start=START_ANGLE, end=active_angle, fill=fill_col)
 
@@ -145,7 +172,7 @@ def draw_ui(disp, rpm, is_running):
         knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2
         rad = math.radians(active_angle)
         kx, ky = CENTER[0] + knob_dist * math.cos(rad), CENTER[1] + knob_dist * math.sin(rad)
-        draw.ellipse([kx-KNOB_RADIUS, ky-KNOB_RADIUS, kx+KNOB_RADIUS, ky+KNOB_RADIUS], fill=COL_KNOB)
+        draw.ellipse([kx-KNOB_RADIUS, ky-KNOB_RADIUS, kx+KNOB_RADIUS, ky+KNOB_RADIUS], fill=knob_color)
 
     # Button
     btn_col = COL_BTN_STOP if is_running else COL_BTN_GO
@@ -160,7 +187,7 @@ def draw_ui(disp, rpm, is_running):
     # RPM text (display at half - gearbox reduction)
     if CACHED_FONT:
         draw.text((CENTER[0], CENTER[1] + 70*SCALE), f"{rpm // 2} RPM",
-                 font=CACHED_FONT, fill=(150,150,150), anchor="mm")
+                 font=CACHED_FONT, fill=(150, 150, 150), anchor="mm")
 
     disp.show_image(img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS))
 
@@ -221,11 +248,16 @@ def main():
             print("WARNING: Touch controller not responding - UI will show but touch won't work")
 
     rpm = 200
-    current_screen = 0  # 0 = RPM screen (more screens added progressively)
+    current_screen = 0   # 0 = RPM screen (more screens added progressively)
     motor_proc = None
     last_activity_time = time.time()
     is_standby = False
-    gesture_cooldown_until = 0  # ignore touch events for a short time after a gesture
+
+    # Touch interaction state machine
+    interact_state = INTERACT_IDLE
+    interact_start_time = 0
+    was_touching = False          # tracks finger-down so we can detect lift
+    gesture_cooldown_until = 0
 
     draw_ui(disp, rpm, is_running=False)
 
@@ -234,64 +266,104 @@ def main():
             try:
                 current_time = time.time()
 
-                # Check for standby timeout (only if motor not running)
+                # Standby timeout (only when motor stopped)
                 if not is_standby and motor_proc is None:
                     if current_time - last_activity_time > STANDBY_TIMEOUT:
                         disp.sleep_display()
                         is_standby = True
 
-                # Check for touch or gesture event
-                if touch.is_touched():
+                currently_touched = touch.is_touched()
+
+                # ── FINGER DOWN ─────────────────────────────────────────────
+                if currently_touched:
                     if touch.read_touch():
-                        # Wake from standby if needed
+
+                        # Wake from standby
                         if is_standby:
                             disp.wake_display()
                             is_standby = False
                             last_activity_time = current_time
+                            interact_state = INTERACT_IDLE
+                            was_touching = False
                             draw_ui(disp, rpm, is_running=(motor_proc is not None))
-                            time.sleep(0.2)  # Debounce wake touch
+                            time.sleep(0.2)
                             continue
 
                         last_activity_time = current_time
 
-                        # Hardware gesture → switch screen
+                        # Hardware gesture → switch screen (consumes the event)
                         gesture = touch.get_gesture()
                         if gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT):
                             current_screen = 1 - current_screen
-                            gesture_cooldown_until = current_time + 0.4  # ignore trailing touch reads
+                            gesture_cooldown_until = current_time + 0.4
+                            interact_state = INTERACT_IDLE
+                            was_touching = False
                             print(f"Screen: {current_screen}")
-                            # placeholder - screen 1 UI drawn in next step
                             draw_ui(disp, rpm, is_running=(motor_proc is not None))
                             continue
 
-                        # Skip slider/button if we're still in gesture cooldown
+                        # Gesture cooldown: drop any trailing touch reads
                         if current_time < gesture_cooldown_until:
+                            was_touching = True
                             continue
 
                         x, y = touch.get_point()
-                        action = map_touch(x, y, debug=False)
 
-                        # Slider - change RPM immediately (only when motor not running)
-                        if isinstance(action, int):
-                            if motor_proc is None:
-                                if action != rpm:
-                                    rpm = action
-                                    draw_ui(disp, rpm, is_running=False)
-                            # Silently ignore slider while motor running
+                        # ── First contact: classify the touch ────────────────
+                        if not was_touching:
+                            was_touching = True
+                            interact_start_time = current_time
 
-                        # Button - toggle motor
-                        elif action == "BUTTON":
+                            if is_on_button(x, y):
+                                interact_state = INTERACT_BUTTON
+
+                            elif is_on_knob(x, y, rpm) and motor_proc is None:
+                                interact_state = INTERACT_KNOB_WAITING
+                                draw_ui(disp, rpm, is_running=False,
+                                        knob_color=COL_KNOB_WAITING)
+
+                            else:
+                                interact_state = INTERACT_IDLE
+
+                        # ── Ongoing hold / drag ──────────────────────────────
+                        else:
+                            hold_time = current_time - interact_start_time
+
+                            if interact_state == INTERACT_KNOB_WAITING:
+                                if hold_time >= KNOB_HOLD_TIME:
+                                    # Hold confirmed — activate drag
+                                    interact_state = INTERACT_KNOB_ACTIVE
+                                    draw_ui(disp, rpm, is_running=False,
+                                            knob_color=COL_KNOB_ACTIVE)
+
+                            elif interact_state == INTERACT_KNOB_ACTIVE:
+                                new_rpm = arc_to_rpm(x, y)
+                                if new_rpm is not None and new_rpm != rpm:
+                                    rpm = new_rpm
+                                    draw_ui(disp, rpm, is_running=False,
+                                            knob_color=COL_KNOB_ACTIVE)
+
+                # ── FINGER LIFTED ────────────────────────────────────────────
+                elif was_touching:
+                    was_touching = False
+                    hold_time = current_time - interact_start_time
+
+                    if interact_state == INTERACT_BUTTON:
+                        # Only act on short taps — long press does nothing
+                        if hold_time <= BUTTON_MAX_TAP:
                             if motor_proc is None:
-                                # START - draw UI BEFORE closing SPI
                                 draw_ui(disp, rpm, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
                             else:
-                                # STOP - reopen SPI, then draw
                                 stop_motor_process(motor_proc, disp)
                                 motor_proc = None
                                 draw_ui(disp, rpm, is_running=False)
-                            # Brief debounce
-                            time.sleep(0.15)
+
+                    elif interact_state in (INTERACT_KNOB_WAITING, INTERACT_KNOB_ACTIVE):
+                        # Restore normal knob colour on release
+                        draw_ui(disp, rpm, is_running=(motor_proc is not None))
+
+                    interact_state = INTERACT_IDLE
 
                 # Check if motor process ended unexpectedly
                 if motor_proc and motor_proc.poll() is not None:
