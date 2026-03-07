@@ -225,6 +225,7 @@ def main():
     motor_proc = None
     last_activity_time = time.time()
     is_standby = False
+    gesture_cooldown_until = 0  # ignore touch events for a short time after a gesture
 
     draw_ui(disp, rpm, is_running=False)
 
@@ -257,10 +258,14 @@ def main():
                         gesture = touch.get_gesture()
                         if gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT):
                             current_screen = 1 - current_screen
+                            gesture_cooldown_until = current_time + 0.4  # ignore trailing touch reads
                             print(f"Screen: {current_screen}")
                             # placeholder - screen 1 UI drawn in next step
                             draw_ui(disp, rpm, is_running=(motor_proc is not None))
-                            time.sleep(0.2)
+                            continue
+
+                        # Skip slider/button if we're still in gesture cooldown
+                        if current_time < gesture_cooldown_until:
                             continue
 
                         x, y = touch.get_point()
