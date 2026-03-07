@@ -349,9 +349,20 @@ def _terminate(proc):
             proc.wait()
 
 def stop_all_processes(motor_proc, servo_proc, disp):
-    """Stop motor + servo subprocesses and reopen LCD SPI."""
-    _terminate(motor_proc)
-    _terminate(servo_proc)
+    """Stop motor + servo simultaneously, then reopen LCD SPI."""
+    # Send SIGTERM to both at the same time so they die in parallel
+    for proc in (motor_proc, servo_proc):
+        if proc and proc.poll() is None:
+            proc.terminate()
+
+    # Wait for both (they're shutting down concurrently)
+    for proc in (motor_proc, servo_proc):
+        if proc and proc.poll() is None:
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
 
     try:
         GPIO.output(SLEEP_PIN, GPIO.LOW)
@@ -427,8 +438,7 @@ def main():
                             was_touching = False
                             redraw(disp, current_screen, rpm, feed_open_time,
                                    is_running=(motor_proc is not None))
-                            print("TOUCH: Wake from standby")
-                            time.sleep(0.2)
+                            time.sleep(0.05)
                             continue
 
                         last_activity_time = current_time
@@ -436,19 +446,16 @@ def main():
                         # Drop trailing reads after a gesture (must check BEFORE gesture handler)
                         if current_time < gesture_cooldown_until:
                             touch.get_gesture()  # clear so it doesn't fire after cooldown
-                            print("TOUCH: Gesture cooldown, ignoring")
                             was_touching = True
                             continue
 
                         # Hardware gesture → switch screen
                         gesture = touch.get_gesture()
                         if gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT):
-                            direction = "LEFT" if gesture == GESTURE_SWIPE_LEFT else "RIGHT"
                             current_screen = 1 - current_screen
                             gesture_cooldown_until = current_time + 0.4
                             interact_state = INTERACT_IDLE
                             was_touching = False
-                            print(f"GESTURE: Swipe {direction} → screen {current_screen}")
                             redraw(disp, current_screen, rpm, feed_open_time,
                                    is_running=(motor_proc is not None))
                             continue
@@ -462,19 +469,16 @@ def main():
 
                             if is_on_button(x, y):
                                 interact_state = INTERACT_BUTTON
-                                print(f"TOUCH: Button pressed at ({x},{y})")
 
                             else:
                                 on_knob = (is_on_knob(x, y, rpm) if current_screen == 0
                                            else is_on_feed_knob(x, y, feed_open_time))
                                 if on_knob and motor_proc is None:
                                     interact_state = INTERACT_KNOB_WAITING
-                                    print(f"TOUCH: Knob pressed at ({x},{y}), hold {KNOB_HOLD_TIME}s to activate")
                                     redraw(disp, current_screen, rpm, feed_open_time,
                                            is_running=False, highlight=True)
                                 else:
                                     interact_state = INTERACT_IDLE
-                                    print(f"TOUCH: Ignored at ({x},{y}) — not on knob or button")
 
                         # ── Continuing hold / drag ───────────────────────────
                         else:
@@ -483,41 +487,31 @@ def main():
                             if interact_state == INTERACT_KNOB_WAITING:
                                 if hold_time >= KNOB_HOLD_TIME:
                                     interact_state = INTERACT_KNOB_ACTIVE
-                                    print(f"TOUCH: Knob ACTIVE after {hold_time:.2f}s hold")
                                     redraw(disp, current_screen, rpm, feed_open_time,
                                            is_running=False, highlight=True)
-                                else:
-                                    print(f"TOUCH: Knob waiting ({hold_time:.2f}s / {KNOB_HOLD_TIME}s)")
 
                             elif interact_state == INTERACT_KNOB_ACTIVE:
                                 if current_screen == 0:
                                     new_val = arc_to_rpm(x, y)
                                     if new_val is not None and new_val != rpm:
-                                        print(f"TOUCH: Drag → RPM {rpm} → {new_val}")
                                         rpm = new_val
                                         redraw(disp, 0, rpm, feed_open_time,
                                                is_running=False, highlight=True)
                                 else:
                                     new_val = arc_to_feed_time(x, y)
                                     if new_val is not None and new_val != feed_open_time:
-                                        print(f"TOUCH: Drag → Feed {feed_open_time:.1f}s → {new_val:.1f}s")
                                         feed_open_time = new_val
                                         redraw(disp, 1, rpm, feed_open_time,
                                                is_running=False, highlight=True)
-
-                            elif interact_state == INTERACT_BUTTON:
-                                print(f"TOUCH: Button held ({hold_time:.2f}s)")
 
                 # ── RELEASE: no touch event for state-appropriate timeout ────
                 release_timeout = BUTTON_RELEASE_TIMEOUT if interact_state == INTERACT_BUTTON else KNOB_RELEASE_TIMEOUT
                 if was_touching and (current_time - last_touch_event_time) > release_timeout:
                     hold_time = last_touch_event_time - interact_start_time
-                    print(f"TOUCH: Released — state={interact_state}, hold={hold_time:.2f}s")
                     was_touching = False
 
                     if interact_state == INTERACT_BUTTON:
                         if hold_time <= BUTTON_MAX_TAP:
-                            print("TOUCH: Button tap → toggle motor+servo")
                             if motor_proc is None:
                                 redraw(disp, current_screen, rpm, feed_open_time, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
@@ -527,11 +521,8 @@ def main():
                                 motor_proc = None
                                 servo_proc = None
                                 redraw(disp, current_screen, rpm, feed_open_time, is_running=False)
-                        else:
-                            print(f"TOUCH: Button long-press ({hold_time:.2f}s) — ignored")
 
                     elif interact_state in (INTERACT_KNOB_WAITING, INTERACT_KNOB_ACTIVE):
-                        print("TOUCH: Knob released — restoring normal colour")
                         redraw(disp, current_screen, rpm, feed_open_time,
                                is_running=(motor_proc is not None))
 

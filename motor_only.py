@@ -123,10 +123,6 @@ def run_motor(target_rpm, config_id='J6'):
 
     motor_config = load_motor_config(config_id)
 
-    print(f"\n{'='*60}")
-    print(f"Motor: {config_id} - {motor_config['name']}")
-    print(f"Target: {target_rpm} RPM | Current: {motor_config['current_ma']}mA | PWM: {motor_config['pwm_freq_khz']}kHz")
-    print(f"{'='*60}")
 
     # Initialize GPIO
     GPIO.setmode(GPIO.BCM)
@@ -175,18 +171,7 @@ def run_motor(target_rpm, config_id='J6'):
     write_reg(REG_STATUS, 0x000)
     time.sleep(0.01)
 
-    # Verify configuration
-    try:
-        ctrl_readback = read_reg(REG_CTRL)
-        if ctrl_readback == 0xFFF or ctrl_readback == 0x000:
-            print("BLIND mode - MISO not working")
-        elif ctrl_readback != ctrl:
-            print(f"Warning: Register mismatch")
-    except:
-        print("BLIND mode")
-
     # Enable driver and start motor
-    print(f"\nStarting motor at {target_rpm} RPM (Ctrl+C to stop)\n")
     GPIO.output(DIR_PIN, MOTOR_DIRECTION)
     ctrl_enabled = ctrl | 0x01
     write_reg(REG_CTRL, ctrl_enabled)
@@ -219,10 +204,9 @@ def run_motor(target_rpm, config_id='J6'):
             while time.perf_counter() < t_next: pass
 
     except KeyboardInterrupt:
-        print("\nStopping...")
+        pass
     finally:
         GPIO.output(SLEEP_PIN, GPIO.LOW)
-        print("Motor stopped")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or len(sys.argv) > 3:
