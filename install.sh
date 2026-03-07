@@ -34,6 +34,7 @@ if [ "$1" == "-simple" ]; then
     mkdir -p "$INSTALL_DIR"
     cp "$SCRIPT_DIR/motor_control.py" "$INSTALL_DIR/"
     cp "$SCRIPT_DIR/motor_only.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/servo_only.py" "$INSTALL_DIR/"
     cp "$SCRIPT_DIR/motor_configs.json" "$INSTALL_DIR/"
     cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
     cp "$SCRIPT_DIR/lcd_display.py" "$INSTALL_DIR/"

@@ -316,7 +316,7 @@ def redraw(disp, screen, rpm, feed_time, is_running, highlight=False):
 # --- MOTOR PROCESS MANAGEMENT ---
 
 def start_motor_process(rpm, disp, config_id='K4'):
-    """Start motor process with specified config"""
+    """Start motor subprocess."""
     disp.close_spi_for_motor()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     motor_script = os.path.join(script_dir, "motor_only.py")
@@ -327,8 +327,19 @@ def start_motor_process(rpm, disp, config_id='K4'):
         text=True
     )
 
-def stop_motor_process(proc, disp):
-    """Stop motor process and reopen LCD SPI"""
+def start_servo_process(feed_open_time):
+    """Start servo subprocess."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    servo_script = os.path.join(script_dir, "servo_only.py")
+    return subprocess.Popen(
+        ["python3", servo_script, f"{feed_open_time:.2f}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+
+def _terminate(proc):
+    """Terminate a subprocess gracefully."""
     if proc and proc.poll() is None:
         proc.terminate()
         try:
@@ -336,6 +347,11 @@ def stop_motor_process(proc, disp):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+
+def stop_all_processes(motor_proc, servo_proc, disp):
+    """Stop motor + servo subprocesses and reopen LCD SPI."""
+    _terminate(motor_proc)
+    _terminate(servo_proc)
 
     try:
         GPIO.output(SLEEP_PIN, GPIO.LOW)
@@ -373,6 +389,7 @@ def main():
     feed_open_time = 2.0  # seconds (screen 1)
     current_screen = 0
     motor_proc = None
+    servo_proc = None
     last_activity_time = time.time()
     is_standby = False
 
@@ -500,13 +517,15 @@ def main():
 
                     if interact_state == INTERACT_BUTTON:
                         if hold_time <= BUTTON_MAX_TAP:
-                            print("TOUCH: Button tap → toggle motor")
+                            print("TOUCH: Button tap → toggle motor+servo")
                             if motor_proc is None:
                                 redraw(disp, current_screen, rpm, feed_open_time, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
+                                servo_proc = start_servo_process(feed_open_time)
                             else:
-                                stop_motor_process(motor_proc, disp)
+                                stop_all_processes(motor_proc, servo_proc, disp)
                                 motor_proc = None
+                                servo_proc = None
                                 redraw(disp, current_screen, rpm, feed_open_time, is_running=False)
                         else:
                             print(f"TOUCH: Button long-press ({hold_time:.2f}s) — ignored")
@@ -518,21 +537,27 @@ def main():
 
                     interact_state = INTERACT_IDLE
 
-                # Check if motor process ended unexpectedly
-                if motor_proc and motor_proc.poll() is not None:
-                    print(f"Motor process ended with code {motor_proc.returncode}")
-                    try:
-                        stdout = motor_proc.stdout.read()
-                        stderr = motor_proc.stderr.read()
-                        if stdout:
-                            print(f"stdout: {stdout}")
-                        if stderr:
-                            print(f"stderr: {stderr}")
-                    except:
-                        pass
+                # Check if either subprocess ended unexpectedly
+                unexpected_exit = (
+                    (motor_proc and motor_proc.poll() is not None) or
+                    (servo_proc  and servo_proc.poll()  is not None)
+                )
+                if unexpected_exit:
+                    print("WARNING: subprocess exited unexpectedly — stopping both")
+                    for proc, name in ((motor_proc, "motor"), (servo_proc, "servo")):
+                        if proc:
+                            print(f"  [{name}] exit={proc.returncode}")
+                            try:
+                                out = proc.stdout.read()
+                                err = proc.stderr.read()
+                                if out: print(f"  [{name}] stdout: {out}")
+                                if err: print(f"  [{name}] stderr: {err}")
+                            except:
+                                pass
 
-                    stop_motor_process(None, disp)
+                    stop_all_processes(motor_proc, servo_proc, disp)
                     motor_proc = None
+                    servo_proc = None
 
                     if is_standby:
                         disp.wake_display()
@@ -553,8 +578,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        if motor_proc:
-            stop_motor_process(motor_proc, disp)
+        if motor_proc or servo_proc:
+            stop_all_processes(motor_proc, servo_proc, disp)
         # Wake display on exit so user can see it stopped
         if is_standby:
             disp.wake_display()
