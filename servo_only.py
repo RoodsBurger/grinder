@@ -17,10 +17,10 @@ import signal
 from gpiozero import Servo
 from gpiozero.pins.lgpio import LGPIOFactory
 
-SERVO_PIN   = 26
-CLOSED_TIME = 1.0   # total closed time per cycle (fixed)
-SERVO_SETTLE = 0.3  # time for servo to physically reach position before cutting PWM
-POLL_STEP   = 0.02  # loop resolution (50 Hz)
+SERVO_PIN    = 26
+OPEN_TIME    = 0.15  # fixed gate open duration per burst (seconds)
+SERVO_SETTLE = 0.3   # time for servo to physically reach position before cutting PWM
+POLL_STEP    = 0.02  # loop resolution (50 Hz)
 
 servo = None
 shutdown_requested = False
@@ -46,12 +46,12 @@ def main():
         print("Usage: python3 servo_only.py <open_time>")
         sys.exit(1)
 
-    open_time = float(sys.argv[1])
+    closed_time = float(sys.argv[1])
 
     factory = LGPIOFactory()
     servo = Servo(SERVO_PIN, pin_factory=factory)
 
-    always_open = (open_time <= 0)
+    always_open = (closed_time <= 0)
 
     if always_open:
         # Gate stays open permanently until shutdown
@@ -65,9 +65,9 @@ def main():
         servo.value = None  # cut PWM to prevent jitter
 
         while not shutdown_requested:
-            # Open gate
+            # Open gate for fixed burst
             servo.value = 1.0
-            wait(open_time)
+            wait(OPEN_TIME)
 
             if shutdown_requested:
                 break
@@ -77,8 +77,8 @@ def main():
             time.sleep(SERVO_SETTLE)
             servo.value = None  # cut PWM
 
-            # Wait remaining closed time
-            wait(CLOSED_TIME - SERVO_SETTLE)
+            # Wait closed time (pause between bursts)
+            wait(closed_time - SERVO_SETTLE)
 
     # Graceful shutdown: ensure gate is closed
     servo.value = -1.0

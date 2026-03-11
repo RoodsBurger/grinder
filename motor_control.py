@@ -58,9 +58,10 @@ COL_AMBER_SOFT = (110, 65, 0)
 COL_AMBER_LOCKED = (80, 70, 50)
 
 # Feed control range
-MIN_FEED_TIME = 0.1   # seconds
-MAX_FEED_TIME = 1.0   # at max, gate stays permanently open
-FEED_STEP     = 0.1
+FEED_OPEN_TIME  = 0.15  # fixed gate open duration (seconds)
+MIN_FEED_CLOSED = 1.0   # min pause between bursts
+MAX_FEED_CLOSED = 10.0  # at max, gate stays permanently open
+FEED_STEP       = 1.0
 
 # Touch interaction
 KNOB_HIT_RADIUS = 38   # px (real coords) - must press within this distance of knob
@@ -160,7 +161,7 @@ def arc_to_rpm(x, y):
 
 def get_feed_knob_pos(feed_time):
     """Return feed knob center in real (1x) coordinates."""
-    ratio = (feed_time - MIN_FEED_TIME) / (MAX_FEED_TIME - MIN_FEED_TIME)
+    ratio = (feed_time - MIN_FEED_CLOSED) / (MAX_FEED_CLOSED - MIN_FEED_CLOSED)
     active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
     knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2 / SCALE
     rad = math.radians(active_angle)
@@ -180,9 +181,9 @@ def arc_to_feed_time(x, y):
     eff_angle = angle if angle >= 135 else angle + 360
     if 135 <= eff_angle <= 405:
         ratio = (eff_angle - 135) / 270
-        raw = MIN_FEED_TIME + ratio * (MAX_FEED_TIME - MIN_FEED_TIME)
+        raw = MIN_FEED_CLOSED + ratio * (MAX_FEED_CLOSED - MIN_FEED_CLOSED)
         snapped = round(raw / FEED_STEP) * FEED_STEP
-        return max(MIN_FEED_TIME, min(MAX_FEED_TIME, snapped))
+        return max(MIN_FEED_CLOSED, min(MAX_FEED_CLOSED, snapped))
     return None
 
 def draw_nav_dots(draw, active_screen, num_screens=2):
@@ -264,7 +265,7 @@ def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1)
     draw.pieslice(bbox, start=START_ANGLE, end=END_ANGLE, fill=COL_TRACK)
 
     # Active arc (amber)
-    ratio = (feed_time - MIN_FEED_TIME) / (MAX_FEED_TIME - MIN_FEED_TIME)
+    ratio = (feed_time - MIN_FEED_CLOSED) / (MAX_FEED_CLOSED - MIN_FEED_CLOSED)
     active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
     if is_running:
         fill_col = COL_AMBER_LOCKED
@@ -300,7 +301,7 @@ def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1)
 
     # Feed time label
     if CACHED_FONT:
-        label = "∞" if feed_time >= MAX_FEED_TIME else f"{feed_time:.1f}s"
+        label = "∞" if feed_time >= MAX_FEED_CLOSED else f"{feed_time:.0f}s"
         draw.text((CENTER[0], CENTER[1] + 70*SCALE), label,
                  font=CACHED_FONT, fill=(180, 110, 30), anchor="mm")
 
@@ -328,12 +329,13 @@ def start_motor_process(rpm, disp, config_id='K4'):
         text=True
     )
 
-def start_servo_process(feed_open_time):
-    """Start servo subprocess."""
+def start_servo_process(closed_time):
+    """Start servo subprocess with given closed (pause) time between bursts.
+    closed_time=0 means always open (gate held open permanently)."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     servo_script = os.path.join(script_dir, "servo_only.py")
     return subprocess.Popen(
-        ["python3", servo_script, f"{feed_open_time:.2f}"],
+        ["python3", servo_script, f"{closed_time:.2f}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
@@ -398,7 +400,7 @@ def main():
             print("WARNING: Touch controller not responding - UI will show but touch won't work")
 
     rpm = 200
-    feed_open_time = 0.1  # seconds (screen 1)
+    feed_closed_time = 5.0  # seconds pause between bursts (screen 1)
     current_screen = 0
     motor_proc = None
     servo_proc = None
@@ -437,7 +439,7 @@ def main():
                             last_activity_time = current_time
                             interact_state = INTERACT_IDLE
                             was_touching = False
-                            redraw(disp, current_screen, rpm, feed_open_time,
+                            redraw(disp, current_screen, rpm, feed_closed_time,
                                    is_running=(motor_proc is not None))
                             time.sleep(0.05)
                             continue
@@ -457,7 +459,7 @@ def main():
                             gesture_cooldown_until = current_time + 0.4
                             interact_state = INTERACT_IDLE
                             was_touching = False
-                            redraw(disp, current_screen, rpm, feed_open_time,
+                            redraw(disp, current_screen, rpm, feed_closed_time,
                                    is_running=(motor_proc is not None))
                             continue
 
@@ -473,10 +475,10 @@ def main():
 
                             else:
                                 on_knob = (is_on_knob(x, y, rpm) if current_screen == 0
-                                           else is_on_feed_knob(x, y, feed_open_time))
+                                           else is_on_feed_knob(x, y, feed_closed_time))
                                 if on_knob and motor_proc is None:
                                     interact_state = INTERACT_KNOB_WAITING
-                                    redraw(disp, current_screen, rpm, feed_open_time,
+                                    redraw(disp, current_screen, rpm, feed_closed_time,
                                            is_running=False, highlight=True)
                                 else:
                                     interact_state = INTERACT_IDLE
@@ -488,7 +490,7 @@ def main():
                             if interact_state == INTERACT_KNOB_WAITING:
                                 if hold_time >= KNOB_HOLD_TIME:
                                     interact_state = INTERACT_KNOB_ACTIVE
-                                    redraw(disp, current_screen, rpm, feed_open_time,
+                                    redraw(disp, current_screen, rpm, feed_closed_time,
                                            is_running=False, highlight=True)
 
                             elif interact_state == INTERACT_KNOB_ACTIVE:
@@ -496,13 +498,13 @@ def main():
                                     new_val = arc_to_rpm(x, y)
                                     if new_val is not None and new_val != rpm:
                                         rpm = new_val
-                                        redraw(disp, 0, rpm, feed_open_time,
+                                        redraw(disp, 0, rpm, feed_closed_time,
                                                is_running=False, highlight=True)
                                 else:
                                     new_val = arc_to_feed_time(x, y)
-                                    if new_val is not None and new_val != feed_open_time:
-                                        feed_open_time = new_val
-                                        redraw(disp, 1, rpm, feed_open_time,
+                                    if new_val is not None and new_val != feed_closed_time:
+                                        feed_closed_time = new_val
+                                        redraw(disp, 1, rpm, feed_closed_time,
                                                is_running=False, highlight=True)
 
                 # ── RELEASE: no touch event for state-appropriate timeout ────
@@ -514,19 +516,19 @@ def main():
                     if interact_state == INTERACT_BUTTON:
                         if hold_time <= BUTTON_MAX_TAP:
                             if motor_proc is None:
-                                redraw(disp, current_screen, rpm, feed_open_time, is_running=True)
+                                redraw(disp, current_screen, rpm, feed_closed_time, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
-                                # 0 = always open sentinel
-                                servo_open = 0.0 if feed_open_time >= MAX_FEED_TIME else feed_open_time
-                                servo_proc = start_servo_process(servo_open)
+                                # 0 = always open sentinel (at max closed time position)
+                                closed = 0.0 if feed_closed_time >= MAX_FEED_CLOSED else feed_closed_time
+                                servo_proc = start_servo_process(closed)
                             else:
                                 stop_all_processes(motor_proc, servo_proc, disp)
                                 motor_proc = None
                                 servo_proc = None
-                                redraw(disp, current_screen, rpm, feed_open_time, is_running=False)
+                                redraw(disp, current_screen, rpm, feed_closed_time, is_running=False)
 
                     elif interact_state in (INTERACT_KNOB_WAITING, INTERACT_KNOB_ACTIVE):
-                        redraw(disp, current_screen, rpm, feed_open_time,
+                        redraw(disp, current_screen, rpm, feed_closed_time,
                                is_running=(motor_proc is not None))
 
                     interact_state = INTERACT_IDLE
@@ -557,7 +559,7 @@ def main():
                         disp.wake_display()
                         is_standby = False
 
-                    redraw(disp, current_screen, rpm, feed_open_time, is_running=False)
+                    redraw(disp, current_screen, rpm, feed_closed_time, is_running=False)
                     last_activity_time = current_time
                     time.sleep(0.5)
 
