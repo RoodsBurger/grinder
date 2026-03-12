@@ -17,7 +17,7 @@ random.seed(42)
 SLEEP_PIN = 7
 
 # --- CONFIGURATION ---
-MOTOR_CONFIG_ID = 'K4'  # Motor config from motor_configs.json (6500mA, 100kHz PWM, 1/64 step)
+MOTOR_CONFIG_ID = 'M1'  # Motor config from motor_configs.json (3500mA, 1/8 step, auto-mixed decay)
 MIN_RPM = 0
 MAX_RPM = 300
 STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
@@ -317,7 +317,7 @@ def redraw(disp, screen, rpm, feed_time, is_running, highlight=False):
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
-def start_motor_process(rpm, disp, config_id='K4'):
+def start_motor_process(rpm, disp, config_id='M1'):
     """Start motor subprocess."""
     disp.close_spi_for_motor()
     script_dir = os.path.dirname(os.path.abspath(__file__))

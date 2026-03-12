@@ -4,16 +4,16 @@ Standalone motor control - runs in separate process
 No display, no touch - just motor operation
 
 MOTOR CONFIGURATION: Loaded from motor_configs.json
-- Defaults to J6 (Torque + Quiet Compromise v1) if no config specified
+- Defaults to M1 (NEMA 23, 1/8 step, 3500mA) if no config specified
 - Can load any config by passing config ID as argument
 
 Usage:
     python3 motor_only.py <RPM> [CONFIG_ID]
 
 Examples:
-    python3 motor_only.py 200          # Use J6 config at 200 RPM
-    python3 motor_only.py 200 K1       # Use K1 config at 200 RPM
-    python3 motor_only.py 100 A3       # Use A3 config at 100 RPM
+    python3 motor_only.py 200          # Use M1 config at 200 RPM
+    python3 motor_only.py 200 M1       # Use M1 config at 200 RPM
+    python3 motor_only.py 100 A3       # Use A3 config at 100 RPM (legacy, see WARNING in JSON)
 
 Reference: https://github.com/pololu/high-power-stepper-driver-arduino
 """
@@ -42,7 +42,7 @@ SCS_PIN, DIR_PIN, STEP_PIN, SLEEP_PIN, LCD_CS_PIN = 8, 24, 25, 7, 22
 SPI_BUS, SPI_DEVICE, SPI_SPEED = 0, 0, 500000
 spi, MOTOR_DIRECTION = None, 1
 
-def load_motor_config(config_id='J6'):
+def load_motor_config(config_id='M1'):
     """Load motor configuration from motor_configs.json"""
     config_path = os.path.join(os.path.dirname(__file__), 'motor_configs.json')
 
@@ -64,12 +64,21 @@ def load_motor_config(config_id='J6'):
     return configs[config_id]
 
 def calculate_torque_register(current_ma):
-    """Calculate TORQUE register and ISGAIN bits for given current"""
-    r_sense = 0.030
-    gains = [(0, 3.3), (1, 1.65), (2, 0.825), (3, 0.4125)]
+    """Calculate TORQUE register and ISGAIN bits for given current.
 
-    for gain_bits, v_ref in gains:
-        torque = int((384 * (current_ma / 1000.0) * r_sense * 2) / v_ref)
+    DRV8711 formula (SLVSC40H eq.):
+        I_TRIP = (TORQUE/256) × (2.75V / (ISGAIN × Rsense))
+        → TORQUE = I_mA/1000 × 256 × ISGAIN × Rsense / 2.75
+
+    Highest ISGAIN tried first to maximise register resolution.
+    """
+    r_sense = 0.030
+    vref    = 2.75
+    # (gain_bits, isgain_multiplier) — highest gain first
+    gains = [(3, 40), (2, 20), (1, 10), (0, 5)]
+
+    for gain_bits, isgain in gains:
+        torque = int((current_ma / 1000.0) * 256 * isgain * r_sense / vref)
         if 0 <= torque <= 255:
             return (torque, gain_bits)
 
@@ -114,7 +123,7 @@ def read_reg(reg: int) -> int:
     time.sleep(0.0001)
     return ((result[0] & 0x0F) << 8) | result[1]
 
-def run_motor(target_rpm, config_id='J6'):
+def run_motor(target_rpm, config_id='M1'):
     """Run motor at target RPM until process is killed"""
     global shutdown_requested, spi
 
@@ -178,11 +187,18 @@ def run_motor(target_rpm, config_id='J6'):
     time.sleep(0.001)
     close_spi()
 
-    # Calculate delays (using config microstepping)
-    steps_rev = 200
+    # Calculate step timing
+    steps_rev  = 200
     microsteps = motor_config['microstep_divider']
-    steps_per_sec = (target_rpm * steps_rev * microsteps) / 60
-    cruise_delay = 1.0 / steps_per_sec if steps_per_sec > 0 else 0.01
+    steps_per_sec_target = (target_rpm * steps_rev * microsteps) / 60.0
+    cruise_delay = 1.0 / steps_per_sec_target if steps_per_sec_target > 0 else 0.01
+
+    # Acceleration ramp: linear from 15% → 100% of target speed over RAMP_TIME seconds
+    RAMP_TIME           = 1.5   # seconds to reach full speed
+    RAMP_START_FRACTION = 0.15  # begin at 15% of target RPM
+    steps_per_sec_start = max(5.0 * microsteps,
+                              steps_per_sec_target * RAMP_START_FRACTION)
+    ramp_steps = int(RAMP_TIME * steps_per_sec_target)
 
     # Local optimizations
     step_pin = STEP_PIN
@@ -190,18 +206,25 @@ def run_motor(target_rpm, config_id='J6'):
     gpio_high = GPIO.HIGH
     gpio_low = GPIO.LOW
 
+    step_count = 0
     t_next = time.perf_counter()
 
     try:
-        # Run at constant speed until shutdown requested (no acceleration/deceleration)
         while not shutdown_requested:
+            if step_count < ramp_steps:
+                progress = step_count / ramp_steps
+                spd = steps_per_sec_start + (steps_per_sec_target - steps_per_sec_start) * progress
+                t_next += 1.0 / spd
+            else:
+                t_next += cruise_delay
+
             gpio_out(step_pin, gpio_high)
             t_pulse = time.perf_counter()
             while time.perf_counter() - t_pulse < 0.000002: pass
             gpio_out(step_pin, gpio_low)
 
-            t_next += cruise_delay
             while time.perf_counter() < t_next: pass
+            step_count += 1
 
     except KeyboardInterrupt:
         pass
@@ -214,12 +237,12 @@ if __name__ == "__main__":
         print("")
         print("Arguments:")
         print("  RPM        - Target speed (0-400)")
-        print("  CONFIG_ID  - Motor configuration ID (default: J6)")
+        print("  CONFIG_ID  - Motor configuration ID (default: M1)")
         print("")
         print("Examples:")
-        print("  python3 motor_only.py 200       # Use J6 config at 200 RPM")
-        print("  python3 motor_only.py 200 K1    # Use K1 config at 200 RPM")
-        print("  python3 motor_only.py 100 A3    # Use A3 config at 100 RPM")
+        print("  python3 motor_only.py 200       # Use M1 config at 200 RPM")
+        print("  python3 motor_only.py 200 M1    # Use M1 config at 200 RPM")
+        print("  python3 motor_only.py 100 A3    # Use A3 config (legacy - see WARNING in JSON)")
         sys.exit(1)
 
     try:
@@ -229,8 +252,8 @@ if __name__ == "__main__":
             print("ERROR: RPM must be 0-400")
             sys.exit(1)
 
-        # Parse optional config ID (default to J6)
-        config_id = sys.argv[2] if len(sys.argv) == 3 else 'J6'
+        # Parse optional config ID (default to M1)
+        config_id = sys.argv[2] if len(sys.argv) == 3 else 'M1'
 
         # Run motor with specified config
         run_motor(rpm, config_id)

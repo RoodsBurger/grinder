@@ -2,14 +2,15 @@
 """
 servo_only.py - Bean feeder servo controller
 
-Controls a servo on GPIO 26 to cycle open/close the bean gate.
-Cycle: open for <open_time> seconds, then closed for CLOSED_TIME seconds total.
+Controls a servo on GPIO 26 to burst-feed beans.
+Cycle: open for OPEN_TIME (0.15s fixed), closed for <closed_time> seconds.
 
 Usage:
-    python3 servo_only.py <open_time>
+    python3 servo_only.py <closed_time>
 
-Example:
-    python3 servo_only.py 2.0   # open 2s, closed 1s
+Examples:
+    python3 servo_only.py 5.0   # open 0.15s, closed 5s
+    python3 servo_only.py 0     # always open
 """
 import sys
 import time
