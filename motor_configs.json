@@ -1,8 +1,8 @@
 {
   "_WARNING": "Configs A-K were calibrated with a buggy formula that delivered ~50% of listed current_ma. They will overdrive the motor with the corrected formula. Use M1 or halve current_ma in any A-K config before use.",
   "M1": {
-    "name": "NEMA 23 - 1/8 step, auto-mixed decay, 3500mA (use with fixed formula)",
-    "current_ma": 3500,
+    "name": "NEMA 23 - 1/8 step, auto-mixed decay, 4200mA (use with fixed formula)",
+    "current_ma": 4200,
     "ctrl_base": 3096,
     "off": 48,
     "blank": 384,
