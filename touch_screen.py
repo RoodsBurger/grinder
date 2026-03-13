@@ -204,7 +204,9 @@ class TouchScreen:
                     self.touched = True
                     self.last_touch_time = current_time
 
-                    if self.touch_state == self.STATE_IDLE:
+                    if self.touch_state in (self.STATE_IDLE, self.STATE_RELEASED):
+                        self.x_history.clear()   # fresh filter for new touch
+                        self.y_history.clear()
                         self.touch_state = self.STATE_PRESSED
                         self.press_start_time = current_time
                     elif self.touch_state == self.STATE_PRESSED:
