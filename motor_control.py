@@ -18,7 +18,7 @@ SLEEP_PIN = 7
 
 # --- CONFIGURATION ---
 MOTOR_CONFIG_ID = 'M1'  # Motor config from motor_configs.json (3500mA, 1/8 step, auto-mixed decay)
-MIN_RPM = 30
+MIN_RPM = 60
 MAX_RPM = 300
 STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
 
@@ -154,7 +154,7 @@ def arc_to_rpm(x, y):
     eff_angle = angle if angle >= 135 else angle + 360
     if 135 <= eff_angle <= 405:
         ratio = (eff_angle - 135) / 270
-        return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / 10) * 10)
+        return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / 20) * 20)
     return None
 
 # --- DOSER SCREEN HELPERS ---
