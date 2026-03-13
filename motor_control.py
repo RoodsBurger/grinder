@@ -52,16 +52,15 @@ COL_BTN_GO = (46, 204, 113)
 COL_BTN_STOP = (231, 76, 60)
 COL_TEXT = (255, 255, 255)
 
-# Amber palette for screen 1 (feed control)
+# Amber palette for screen 1 (doser control)
 COL_AMBER = (230, 140, 0)
 COL_AMBER_SOFT = (110, 65, 0)
 COL_AMBER_LOCKED = (80, 70, 50)
 
-# Feed control range
-FEED_OPEN_TIME  = 0.15  # fixed gate open duration (seconds)
-MIN_FEED_CLOSED = 1.0   # min pause between bursts
-MAX_FEED_CLOSED = 10.0  # at max, gate stays permanently open
-FEED_STEP       = 1.0
+# Doser speed range
+MIN_DOSER_SPEED  = 0.0    # stopped
+MAX_DOSER_SPEED  = 1.0    # full speed
+DOSER_SPEED_STEP = 0.05   # 5% increments
 
 # Touch interaction
 KNOB_HIT_RADIUS = 38   # px (real coords) - must press within this distance of knob
@@ -157,23 +156,23 @@ def arc_to_rpm(x, y):
         return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / 10) * 10)
     return None
 
-# --- FEED SCREEN HELPERS ---
+# --- DOSER SCREEN HELPERS ---
 
-def get_feed_knob_pos(feed_time):
-    """Return feed knob center in real (1x) coordinates."""
-    ratio = (feed_time - MIN_FEED_CLOSED) / (MAX_FEED_CLOSED - MIN_FEED_CLOSED)
+def get_doser_knob_pos(doser_speed):
+    """Return doser knob center in real (1x) coordinates."""
+    ratio = doser_speed  # already 0.0–1.0
     active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
     knob_dist = (RADIUS_OUTER + RADIUS_INNER) / 2 / SCALE
     rad = math.radians(active_angle)
     return (W_REAL // 2 + knob_dist * math.cos(rad),
             H_REAL // 2 + knob_dist * math.sin(rad))
 
-def is_on_feed_knob(x, y, feed_time):
-    kx, ky = get_feed_knob_pos(feed_time)
+def is_on_doser_knob(x, y, doser_speed):
+    kx, ky = get_doser_knob_pos(doser_speed)
     return math.sqrt((x - kx)**2 + (y - ky)**2) < KNOB_HIT_RADIUS
 
-def arc_to_feed_time(x, y):
-    """Convert touch to snapped feed-time value, or None if outside arc zone."""
+def arc_to_doser_speed(x, y):
+    """Convert touch to snapped doser speed, or None if outside arc zone."""
     dx, dy = x - W_REAL // 2, y - H_REAL // 2
     if math.sqrt(dx*dx + dy*dy) < 45:
         return None
@@ -181,9 +180,8 @@ def arc_to_feed_time(x, y):
     eff_angle = angle if angle >= 135 else angle + 360
     if 135 <= eff_angle <= 405:
         ratio = (eff_angle - 135) / 270
-        raw = MIN_FEED_CLOSED + ratio * (MAX_FEED_CLOSED - MIN_FEED_CLOSED)
-        snapped = round(raw / FEED_STEP) * FEED_STEP
-        return max(MIN_FEED_CLOSED, min(MAX_FEED_CLOSED, snapped))
+        snapped = round(ratio / DOSER_SPEED_STEP) * DOSER_SPEED_STEP
+        return max(MIN_DOSER_SPEED, min(MAX_DOSER_SPEED, snapped))
     return None
 
 def draw_nav_dots(draw, active_screen, num_screens=2):
@@ -252,8 +250,8 @@ def draw_ui(disp, rpm, is_running, highlight=False, current_screen=0):
     draw_nav_dots(draw, current_screen)
     disp.show_image(img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS))
 
-def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1):
-    """Screen 1: Feed open-time control (amber arc)."""
+def draw_doser_ui(disp, doser_speed, is_running, highlight=False, current_screen=1):
+    """Screen 1: Doser speed control (amber arc)."""
     knob_color = COL_KNOB if highlight else COL_KNOB_SOFT
 
     img = Image.new("RGB", (W_HIGH, H_HIGH), COL_BG)
@@ -265,7 +263,7 @@ def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1)
     draw.pieslice(bbox, start=START_ANGLE, end=END_ANGLE, fill=COL_TRACK)
 
     # Active arc (amber)
-    ratio = (feed_time - MIN_FEED_CLOSED) / (MAX_FEED_CLOSED - MIN_FEED_CLOSED)
+    ratio = doser_speed  # already 0.0–1.0
     active_angle = START_ANGLE + ratio * (END_ANGLE - START_ANGLE)
     if is_running:
         fill_col = COL_AMBER_LOCKED
@@ -299,21 +297,21 @@ def draw_feed_ui(disp, feed_time, is_running, highlight=False, current_screen=1)
     if icon:
         img.paste(icon, (CENTER[0] - ICON_SIZE, CENTER[1] - ICON_SIZE), icon)
 
-    # Feed time label
+    # Speed label
     if CACHED_FONT:
-        label = "∞" if feed_time >= MAX_FEED_CLOSED else f"{feed_time:.0f}s"
+        label = f"{int(round(doser_speed * 100))}%"
         draw.text((CENTER[0], CENTER[1] + 70*SCALE), label,
                  font=CACHED_FONT, fill=(180, 110, 30), anchor="mm")
 
     draw_nav_dots(draw, current_screen)
     disp.show_image(img.resize((W_REAL, H_REAL), Image.Resampling.LANCZOS))
 
-def redraw(disp, screen, rpm, feed_time, is_running, highlight=False):
+def redraw(disp, screen, rpm, doser_speed, is_running, highlight=False):
     """Dispatch draw to the correct screen function."""
     if screen == 0:
         draw_ui(disp, rpm, is_running, highlight=highlight, current_screen=screen)
     else:
-        draw_feed_ui(disp, feed_time, is_running, highlight=highlight, current_screen=screen)
+        draw_doser_ui(disp, doser_speed, is_running, highlight=highlight, current_screen=screen)
 
 # --- MOTOR PROCESS MANAGEMENT ---
 
@@ -329,13 +327,12 @@ def start_motor_process(rpm, disp, config_id='M1'):
         text=True
     )
 
-def start_servo_process(closed_time):
-    """Start servo subprocess with given closed (pause) time between bursts.
-    closed_time=0 means always open (gate held open permanently)."""
+def start_servo_process(doser_speed):
+    """Start doser servo at given speed (0.0–1.0)."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     servo_script = os.path.join(script_dir, "servo_only.py")
     return subprocess.Popen(
-        ["python3", servo_script, f"{closed_time:.2f}"],
+        ["python3", servo_script, f"{doser_speed:.2f}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
@@ -400,7 +397,7 @@ def main():
             print("WARNING: Touch controller not responding - UI will show but touch won't work")
 
     rpm = 200
-    feed_closed_time = 5.0  # seconds pause between bursts (screen 1)
+    doser_speed = 0.5  # doser wheel speed 0.0–1.0 (screen 1)
     current_screen = 0
     motor_proc = None
     servo_proc = None
@@ -439,7 +436,7 @@ def main():
                             last_activity_time = current_time
                             interact_state = INTERACT_IDLE
                             was_touching = False
-                            redraw(disp, current_screen, rpm, feed_closed_time,
+                            redraw(disp, current_screen, rpm, doser_speed,
                                    is_running=(motor_proc is not None))
                             time.sleep(0.05)
                             continue
@@ -459,7 +456,7 @@ def main():
                             gesture_cooldown_until = current_time + 0.4
                             interact_state = INTERACT_IDLE
                             was_touching = False
-                            redraw(disp, current_screen, rpm, feed_closed_time,
+                            redraw(disp, current_screen, rpm, doser_speed,
                                    is_running=(motor_proc is not None))
                             continue
 
@@ -475,10 +472,10 @@ def main():
 
                             else:
                                 on_knob = (is_on_knob(x, y, rpm) if current_screen == 0
-                                           else is_on_feed_knob(x, y, feed_closed_time))
+                                           else is_on_doser_knob(x, y, doser_speed))
                                 if on_knob and motor_proc is None:
                                     interact_state = INTERACT_KNOB_WAITING
-                                    redraw(disp, current_screen, rpm, feed_closed_time,
+                                    redraw(disp, current_screen, rpm, doser_speed,
                                            is_running=False, highlight=True)
                                 else:
                                     interact_state = INTERACT_IDLE
@@ -490,7 +487,7 @@ def main():
                             if interact_state == INTERACT_KNOB_WAITING:
                                 if hold_time >= KNOB_HOLD_TIME:
                                     interact_state = INTERACT_KNOB_ACTIVE
-                                    redraw(disp, current_screen, rpm, feed_closed_time,
+                                    redraw(disp, current_screen, rpm, doser_speed,
                                            is_running=False, highlight=True)
 
                             elif interact_state == INTERACT_KNOB_ACTIVE:
@@ -498,13 +495,13 @@ def main():
                                     new_val = arc_to_rpm(x, y)
                                     if new_val is not None and new_val != rpm:
                                         rpm = new_val
-                                        redraw(disp, 0, rpm, feed_closed_time,
+                                        redraw(disp, 0, rpm, doser_speed,
                                                is_running=False, highlight=True)
                                 else:
-                                    new_val = arc_to_feed_time(x, y)
-                                    if new_val is not None and new_val != feed_closed_time:
-                                        feed_closed_time = new_val
-                                        redraw(disp, 1, rpm, feed_closed_time,
+                                    new_val = arc_to_doser_speed(x, y)
+                                    if new_val is not None and new_val != doser_speed:
+                                        doser_speed = new_val
+                                        redraw(disp, 1, rpm, doser_speed,
                                                is_running=False, highlight=True)
 
                 # ── RELEASE: no touch event for state-appropriate timeout ────
@@ -516,19 +513,17 @@ def main():
                     if interact_state == INTERACT_BUTTON:
                         if hold_time <= BUTTON_MAX_TAP:
                             if motor_proc is None:
-                                redraw(disp, current_screen, rpm, feed_closed_time, is_running=True)
+                                redraw(disp, current_screen, rpm, doser_speed, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
-                                # 0 = always open sentinel (at max closed time position)
-                                closed = 0.0 if feed_closed_time >= MAX_FEED_CLOSED else feed_closed_time
-                                servo_proc = start_servo_process(closed)
+                                servo_proc = start_servo_process(doser_speed)
                             else:
                                 stop_all_processes(motor_proc, servo_proc, disp)
                                 motor_proc = None
                                 servo_proc = None
-                                redraw(disp, current_screen, rpm, feed_closed_time, is_running=False)
+                                redraw(disp, current_screen, rpm, doser_speed, is_running=False)
 
                     elif interact_state in (INTERACT_KNOB_WAITING, INTERACT_KNOB_ACTIVE):
-                        redraw(disp, current_screen, rpm, feed_closed_time,
+                        redraw(disp, current_screen, rpm, doser_speed,
                                is_running=(motor_proc is not None))
 
                     interact_state = INTERACT_IDLE
@@ -559,7 +554,7 @@ def main():
                         disp.wake_display()
                         is_standby = False
 
-                    redraw(disp, current_screen, rpm, feed_closed_time, is_running=False)
+                    redraw(disp, current_screen, rpm, doser_speed, is_running=False)
                     last_activity_time = current_time
                     time.sleep(0.5)
 
