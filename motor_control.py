@@ -18,7 +18,7 @@ SLEEP_PIN = 7
 
 # --- CONFIGURATION ---
 MOTOR_CONFIG_ID = 'M1'  # Motor config from motor_configs.json (3500mA, 1/8 step, auto-mixed decay)
-MIN_RPM = 0
+MIN_RPM = 30
 MAX_RPM = 300
 STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
 
@@ -453,6 +453,11 @@ def main():
 
                         x, y = touch.get_point()
 
+                        # Capture start position BEFORE swipe check (only on first contact)
+                        # This prevents abs(x - 0) false-positives on the very first frame
+                        if not was_touching:
+                            touch_start_x = x
+
                         # Hardware gesture → switch screen (with displacement guard)
                         gesture = touch.get_gesture()
                         if (gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT)
@@ -472,7 +477,7 @@ def main():
                         if not was_touching:
                             was_touching = True
                             interact_start_time = current_time
-                            touch_start_x = x
+                            # touch_start_x already captured above
 
                             if is_on_button(x, y):
                                 interact_state = INTERACT_BUTTON

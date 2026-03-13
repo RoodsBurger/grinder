@@ -19,6 +19,7 @@ Reference: https://github.com/pololu/high-power-stepper-driver-arduino
 """
 import sys
 import time
+import math
 import os
 import signal
 import spidev
@@ -193,9 +194,9 @@ def run_motor(target_rpm, config_id='M1'):
     steps_per_sec_target = (target_rpm * steps_rev * microsteps) / 60.0
     cruise_delay = 1.0 / steps_per_sec_target if steps_per_sec_target > 0 else 0.01
 
-    # Acceleration ramp: linear from 15% → 100% of target speed over RAMP_TIME seconds
-    RAMP_TIME           = 1.5   # seconds to reach full speed
-    RAMP_START_FRACTION = 0.15  # begin at 15% of target RPM
+    # Acceleration ramp: S-curve (cosine ease-in/out) from 5% → 100% of target speed over RAMP_TIME seconds
+    RAMP_TIME           = 2.5   # longer sweep avoids dwelling in resonance band
+    RAMP_START_FRACTION = 0.05  # begin at 5% of target — very slow initial steps
     steps_per_sec_start = max(5.0 * microsteps,
                               steps_per_sec_target * RAMP_START_FRACTION)
     ramp_steps = int(RAMP_TIME * steps_per_sec_target)
@@ -213,7 +214,8 @@ def run_motor(target_rpm, config_id='M1'):
         while not shutdown_requested:
             if step_count < ramp_steps:
                 progress = step_count / ramp_steps
-                spd = steps_per_sec_start + (steps_per_sec_target - steps_per_sec_start) * progress
+                progress_smooth = 0.5 * (1.0 - math.cos(math.pi * progress))  # cosine ease-in/out
+                spd = steps_per_sec_start + (steps_per_sec_target - steps_per_sec_start) * progress_smooth
                 t_next += 1.0 / spd
             else:
                 t_next += cruise_delay
