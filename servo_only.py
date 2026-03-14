@@ -43,6 +43,9 @@ def main():
     factory = LGPIOFactory()
     servo = Servo(SERVO_PIN, pin_factory=factory)
 
+    # Wait for grinder motor to finish acceleration before feeding
+    _sleep_interruptible(3.0)
+
     if speed <= 0.0:
         servo.value = None
         while not shutdown_requested:
