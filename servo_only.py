@@ -16,7 +16,7 @@ from gpiozero import Servo
 from gpiozero.pins.lgpio import LGPIOFactory
 
 SERVO_PIN = 26
-BURST_PERIOD = 0.8   # seconds per on/off cycle
+BURST_PERIOD = 0.15  # seconds per on/off cycle — shorter = smoother average motion
 servo = None
 shutdown_requested = False
 
@@ -42,6 +42,7 @@ def main():
 
     factory = LGPIOFactory()
     servo = Servo(SERVO_PIN, pin_factory=factory)
+    servo.value = None   # prevent drift during startup wait
 
     # Wait for grinder motor to finish acceleration before feeding
     _sleep_interruptible(3.0)
