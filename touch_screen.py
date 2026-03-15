@@ -196,6 +196,14 @@ class TouchScreen:
                         # Still return True if a gesture fired without valid coords
                         return gesture_id != GESTURE_NONE
 
+                    if self.touch_state in (self.STATE_IDLE, self.STATE_RELEASED):
+                        self.x_history.clear()
+                        self.y_history.clear()
+                        self.touch_state = self.STATE_PRESSED
+                        self.press_start_time = current_time
+                    elif self.touch_state == self.STATE_PRESSED:
+                        self.touch_state = self.STATE_HELD
+
                     filtered_x, filtered_y = self.filter_coordinates(x, y)
                     self.x = filtered_x
                     self.y = filtered_y
@@ -203,14 +211,6 @@ class TouchScreen:
                     self.last_y = filtered_y
                     self.touched = True
                     self.last_touch_time = current_time
-
-                    if self.touch_state in (self.STATE_IDLE, self.STATE_RELEASED):
-                        self.x_history.clear()   # fresh filter for new touch
-                        self.y_history.clear()
-                        self.touch_state = self.STATE_PRESSED
-                        self.press_start_time = current_time
-                    elif self.touch_state == self.STATE_PRESSED:
-                        self.touch_state = self.STATE_HELD
 
                     return True
 
@@ -250,15 +250,21 @@ class TouchScreen:
         return True, x, y
 
     def filter_coordinates(self, x, y):
-        """3-sample moving average to reduce jitter."""
+        """3-sample moving average + 5px hysteresis to reduce jitter."""
         self.x_history.append(x)
         self.y_history.append(y)
         if len(self.x_history) > self.filter_size:
             self.x_history.pop(0)
         if len(self.y_history) > self.filter_size:
             self.y_history.pop(0)
-        return sum(self.x_history) // len(self.x_history), \
-               sum(self.y_history) // len(self.y_history)
+        fx = sum(self.x_history) // len(self.x_history)
+        fy = sum(self.y_history) // len(self.y_history)
+        # Suppress sub-threshold movement (hysteresis)
+        if len(self.x_history) == self.filter_size and abs(fx - self.last_x) < 5:
+            fx = self.last_x
+        if len(self.y_history) == self.filter_size and abs(fy - self.last_y) < 5:
+            fy = self.last_y
+        return fx, fy
 
     def get_point(self):
         """Return current touch coordinates."""

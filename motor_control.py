@@ -32,7 +32,7 @@ CENTER = (W_HIGH // 2, H_HIGH // 2)
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 70 * SCALE  # Thicker slider track
 BUTTON_RADIUS = 40 * SCALE  # Button size (visual)
-BUTTON_TOUCH_RADIUS = 30  # Touch detection radius (matches visual button better)
+BUTTON_TOUCH_RADIUS = 36  # Touch detection radius (matches visual button size)
 KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
 ICON_SIZE = 32 * SCALE  # Icon size (bigger)
 
@@ -69,6 +69,7 @@ BUTTON_MAX_TAP  = 0.5  # seconds - button press longer than this is ignored
 BUTTON_RELEASE_TIMEOUT = 0.08  # 80ms — fast tap response for button
 KNOB_RELEASE_TIMEOUT   = 0.50  # 500ms — CST816T can go silent 200ms+ while holding still
 MIN_SWIPE_DISTANCE = 40   # px — minimum horizontal travel to accept a swipe gesture
+BUTTON_SWIPE_CANCEL = 20  # px — if touch moves this far during button press, cancel it
 
 # Interaction states
 INTERACT_IDLE         = 0
@@ -408,10 +409,10 @@ def main():
     # Touch interaction state machine
     interact_state = INTERACT_IDLE
     interact_start_time = 0
-    was_touching = False          # True once first touch event classified
-    last_touch_event_time = 0    # time of most recent touch read — used for release timeout
+    was_touching = False
+    last_touch_event_time = 0
     gesture_cooldown_until = 0
-    touch_start_x = 0            # X coordinate at first contact; used to validate swipe distance
+    touch_start_x = 0
 
     draw_ui(disp, rpm, is_running=False)
 
@@ -445,20 +446,19 @@ def main():
 
                         last_activity_time = current_time
 
-                        # Drop trailing reads after a gesture (must check BEFORE gesture handler)
+                        # Drop trailing reads during gesture cooldown
                         if current_time < gesture_cooldown_until:
-                            touch.get_gesture()  # drain so it won't fire after cooldown
-                            was_touching = False  # clean slate; treat next touch as fresh start
+                            touch.get_gesture()
+                            was_touching = False
                             continue
 
                         x, y = touch.get_point()
 
-                        # Capture start position BEFORE swipe check (only on first contact)
-                        # This prevents abs(x - 0) false-positives on the very first frame
+                        # Capture start position on first contact (before swipe check)
                         if not was_touching:
                             touch_start_x = x
 
-                        # Hardware gesture → switch screen (with displacement guard)
+                        # Hardware gesture → switch screen
                         gesture = touch.get_gesture()
                         if (gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT)
                                 and interact_state == INTERACT_IDLE
@@ -471,13 +471,11 @@ def main():
                             redraw(disp, current_screen, rpm, doser_speed,
                                    is_running=(motor_proc is not None))
                             continue
-                        # else: gesture consumed but ignored; fall through to tap/drag logic
 
                         # ── First contact this gesture ───────────────────────
                         if not was_touching:
                             was_touching = True
                             interact_start_time = current_time
-                            # touch_start_x already captured above
 
                             if is_on_button(x, y):
                                 interact_state = INTERACT_BUTTON
@@ -496,7 +494,11 @@ def main():
                         else:
                             hold_time = current_time - interact_start_time
 
-                            if interact_state == INTERACT_KNOB_WAITING:
+                            if interact_state == INTERACT_BUTTON:
+                                if abs(x - touch_start_x) > BUTTON_SWIPE_CANCEL:
+                                    interact_state = INTERACT_IDLE  # swipe-through, not a tap
+
+                            elif interact_state == INTERACT_KNOB_WAITING:
                                 if hold_time >= KNOB_HOLD_TIME:
                                     interact_state = INTERACT_KNOB_ACTIVE
                                     redraw(disp, current_screen, rpm, doser_speed,

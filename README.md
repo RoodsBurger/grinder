@@ -42,7 +42,7 @@ A Raspberry Pi-based controller for a motorized coffee grinder, featuring a circ
 grinder/
 ├── motor_control.py          # Main application: UI + touch + process orchestration
 ├── motor_only.py             # Subprocess: standalone motor runner (DRV8711 + step pulses)
-├── servo_only.py             # Subprocess: standalone bean feeder servo (trap-door cycle)
+├── servo_only.py             # Subprocess: standalone bean feeder servo (continuous-rotation auger)
 ├── lcd_display.py            # LCD driver: GC9A01 display via SPI
 ├── touch_screen.py           # Touch driver: CST816T via I2C
 ├── motor_configs.json        # 88+ DRV8711 configurations (categories A-K)
@@ -61,16 +61,16 @@ grinder/
 
 ### Bean Feeder Servo (`servo_only.py`)
 
-Runs as a second subprocess alongside `motor_only.py`, controlling a servo on **GPIO 26** (via `gpiozero` + `LGPIOFactory`) that opens and closes a trap-door gate to feed beans into the grinder.
+Runs as a second subprocess alongside `motor_only.py`, controlling a continuous-rotation auger servo on **GPIO 26** (via `gpiozero` + `LGPIOFactory`).
 
-- Servo position: `-1.0` = closed, `1.0` = open (full range).
-- Cycle: open for `<open_time>` seconds → close → wait 0.3 s for servo to move → cut PWM signal (prevents jitter) → wait remaining closed time → repeat.
-- Closed time is always **1.0 s** total (hardcoded).
-- Accepts SIGTERM for graceful shutdown (closes gate before exiting).
+- Accepts a single argument: speed `0.0` (stopped) to `1.0` (full speed).
+- Drives the auger continuously at the given speed until SIGTERM.
+- Supports burst mode for startup torque.
+- Accepts SIGTERM for graceful shutdown.
 
 ```bash
 # Run directly for testing
-python3 servo_only.py 2.0   # open 2 s / closed 1 s
+python3 servo_only.py 0.5   # 50% speed
 ```
 
 Requires: `sudo apt install python3-lgpio`, `pip3 install gpiozero`
@@ -83,15 +83,15 @@ The entry point for normal operation. Requires `sudo` (GPIO access).
 
 | Screen | Arc color | Controls | Label |
 |---|---|---|---|
-| RPM (screen 0) | Blue | Motor speed 0–300 RPM (snaps to 10) | `X RPM` (at half, gearbox) |
-| Feed (screen 1) | Amber | Gate open time 0.5–8.0 s (snaps to 0.5) | `X.Xs open` |
+| RPM (screen 0) | Blue | Motor speed 60–300 RPM (snaps to 20); displayed 30–150 RPM | `X RPM` (at half, gearbox) |
+| Feed (screen 1) | Amber | Doser speed 0–100% (snaps to 5%) | `X%` |
 
 Two navigation dots at the bottom of the display show which screen is active.
 
 **Touch handling:**
-- Touch within ~22px of center = button press (start/stop both motor and feeder).
+- Touch within ~36px of center = button press (start/stop both motor and feeder).
 - Touch on the arc ring = value adjustment (locked while running).
-- Horizontal swipe (>75 px, predominantly horizontal) = switch screen.
+- Horizontal swipe (>`MIN_SWIPE_DISTANCE` = 40 px) = switch screen.
 
 **Process management:**
 - Both `motor_only.py` and `servo_only.py` run as parallel subprocesses.
@@ -106,7 +106,7 @@ Two navigation dots at the bottom of the display show which screen is active.
 
 Runs independently with no display or touch logic.
 
-1. Loads the named config from `motor_configs.json` (default: `K4`).
+1. Loads the named config from `motor_configs.json` (default: `M1`).
 2. Initializes GPIO and SPI.
 3. Calculates TORQUE register and ISGAIN bits from target current (mA) and sense resistor (30 mOhm).
 4. Writes all DRV8711 registers: CTRL, TORQUE, OFF, BLANK, DECAY, DRIVE, STALL, STATUS.
@@ -114,7 +114,7 @@ Runs independently with no display or touch logic.
 6. Uses `time.perf_counter()` busy-wait for precise step timing.
 7. On SIGTERM/SIGINT: sets `shutdown_requested = True`, exits the step loop, pulls SLEEP LOW.
 
-Active motor config in `motor_control.py`: **K4** (8000 mA, 100 kHz PWM, 1/64 microstepping).
+Active motor config in `motor_control.py`: **M1** (3500 mA, 1/8 microstepping, auto-mixed decay).
 
 ### LCD Driver (`lcd_display.py`)
 
@@ -125,10 +125,9 @@ Active motor config in `motor_control.py`: **K4** (8000 mA, 100 kHz PWM, 1/64 mi
 
 ### Touch Driver (`touch_screen.py`)
 
-- Reads 6 bytes from CST816T register `0x02` via I2C.
+- Reads 6 bytes from CST816T register `0x01` via I2C.
 - Validates coordinates (must be within 0-239).
-- Applies a 3-sample moving average filter to reduce jitter.
-- 5-pixel hysteresis to suppress sub-threshold movements.
+- Applies a 3-sample moving average filter with 5-pixel hysteresis to reduce jitter.
 - 10 ms debounce.
 - State machine: IDLE -> PRESSED -> HELD -> RELEASED.
 - Touch detection: polls `GPIO.input(TP_INT) == LOW`.
@@ -249,7 +248,7 @@ journalctl -u motor-control -f
 sudo python3 motor_control.py
 
 # Motor only (for testing)
-sudo python3 motor_only.py 200        # 200 RPM with default J6 config
+sudo python3 motor_only.py 200        # 200 RPM with default M1 config
 sudo python3 motor_only.py 150 K4     # 150 RPM with K4 config
 
 # Diagnostics
@@ -279,5 +278,5 @@ Required Python modules: `RPi.GPIO`, `spidev`, `smbus2`, `PIL` (Pillow), `numpy`
 - The application must run as root (`sudo`) due to GPIO/SPI/I2C access requirements.
 - SPI is shared between the LCD and motor driver via cooperative open/close. Never run `motor_control.py` and `motor_only.py` as separate independent processes simultaneously.
 - Motor RPM displayed on screen is always half the actual motor RPM (gearbox compensation).
-- The RPM slider snaps to multiples of 10, in the range 0-300 (motor side).
+- The RPM slider snaps to multiples of 20, in the range 60–300 (motor side); displayed at half (30–150).
 - `wifi_setup.py` contains hardcoded network credentials - update before deploying on a new network.
