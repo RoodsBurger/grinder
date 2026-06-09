@@ -5,8 +5,12 @@ servo_only.py - Doser servo controller (continuous rotation)
 Controls a 360° continuous-rotation MG90S servo on GPIO 26.
 speed 0.0 = stopped, 1.0 = full speed forward.
 
-Burst mode: always commands full torque (-1.0) and duty-cycles on/off
-to control average speed. This ensures full torque even at low speeds.
+Burst mode: fixed-width full-torque pulses with variable spacing.
+Every pulse is long enough for the servo to actually spin up, so each
+one delivers the same kick of beans; the average feed rate then tracks
+`speed` linearly. (Variable-width pulses don't: below ~50ms the servo
+never reaches speed, and above ~50% duty momentum carries it through
+the short gaps at nearly full speed.)
 
 Usage:
     python3 servo_only.py <speed>   # speed: 0.0–1.0
@@ -16,7 +20,8 @@ from gpiozero import Servo
 from gpiozero.pins.lgpio import LGPIOFactory
 
 SERVO_PIN = 26
-BURST_PERIOD = 0.15  # seconds per on/off cycle — shorter = smoother average motion
+PULSE_ON = 0.15        # seconds of full-torque drive per feed pulse (enough to fully spin up)
+CONTINUOUS_ABOVE = 0.95  # gaps under ~8ms are meaningless — just run continuously
 servo = None
 shutdown_requested = False
 
@@ -56,16 +61,16 @@ def main():
         servo.value = None
         while not shutdown_requested:
             time.sleep(0.1)
-    elif speed >= 1.0:
+    elif speed >= CONTINUOUS_ABOVE:
         servo.value = -1.0
         while not shutdown_requested:
             time.sleep(0.1)
     else:
-        on_time  = speed * BURST_PERIOD
-        off_time = (1.0 - speed) * BURST_PERIOD
+        # rate = PULSE_ON / period → period = PULSE_ON / speed
+        off_time = PULSE_ON * (1.0 / speed - 1.0)
         while not shutdown_requested:
             servo.value = -1.0
-            _sleep_interruptible(on_time)
+            _sleep_interruptible(PULSE_ON)
             if shutdown_requested:
                 break
             servo.value = None

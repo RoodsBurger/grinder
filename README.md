@@ -191,8 +191,9 @@ so they render identically every boot) are pre-rendered once at startup by `prel
 ```
 INTERACT_IDLE
    ├─ touch on center button ──────────────► INTERACT_BUTTON
-   │      (released within BUTTON_MAX_TAP and without moving
-   │       more than BUTTON_SWIPE_CANCEL px → toggle start/stop)
+   │      (released within BUTTON_MAX_TAP, total travel ≤
+   │       BUTTON_SWIPE_CANCEL px, release point still on the
+   │       button, and no swipe gesture seen → toggle start/stop)
    │
    └─ touch on knob (only when stopped) ───► INTERACT_KNOB_WAITING
           (held ≥ KNOB_HOLD_TIME 0.25 s) ──► INTERACT_KNOB_ACTIVE
@@ -200,10 +201,14 @@ INTERACT_IDLE
 ```
 
 Release is *inferred*, not reported: if no touch event arrives for a state-dependent timeout
-(80 ms for buttons → snappy taps; 500 ms for the knob → tolerates the controller's silence) the
-touch is treated as released. A horizontal hardware swipe gesture longer than
-`MIN_SWIPE_DISTANCE` (40 px) toggles the screen, with a 0.4 s cooldown afterwards to swallow
-trailing reads so one swipe doesn't bounce screens.
+(150 ms for buttons — long enough for the CST816T's at-lift gesture report to arrive and veto a
+false tap; 500 ms for the knob → tolerates the controller's silence) the touch is treated as
+released. A horizontal hardware swipe gesture longer than `MIN_SWIPE_DISTANCE` (40 px) toggles
+the screen, with a 0.4 s cooldown afterwards to swallow trailing reads so one swipe doesn't
+bounce screens. **Swipes always win over the button**: a swipe gesture seen at *any* point
+during a contact (except an active knob drag) vetoes the pending button tap — fast swipes
+across the screen center deliver too few coordinate events for travel checks alone, so without
+the veto they would start the grinder instead of switching screens.
 
 **Process orchestration.** START draws the running state first (instant feedback), then
 `start_motor_process()` (closes LCD SPI, spawns `motor_only.py <rpm> M1`) and
@@ -243,19 +248,21 @@ short. On shutdown the loop exits and `SLEEP` is pulled low to de-energize the m
 Drives a **continuous-rotation** auger servo on GPIO26 via `gpiozero` with the `lgpio` pin
 factory. Argument is a feed rate `0.0`–`1.0`.
 
-The trick here is **burst-mode duty cycling**. A cheap CR servo has almost no torque at low
-commanded speeds — it stalls against bean resistance. So instead of commanding a proportional
-speed, this driver *always commands full torque* (`servo.value = -1.0`, the direction that turns
-the auger forward) and instead pulses it on/off within a short `BURST_PERIOD` (0.15 s) window:
+The trick here is **fixed-width full-torque pulsing**. A cheap CR servo has almost no torque at
+low commanded speeds — it stalls against bean resistance. So this driver *always commands full
+torque* (`servo.value = -1.0`, the direction that turns the auger forward) in fixed `PULSE_ON`
+(0.15 s) bursts, and sets the feed rate by varying the *spacing* between bursts:
 
 ```
-on_time  = speed × 0.15 s   (full-torque drive)
-off_time = (1 − speed) × 0.15 s   (servo.value = None → coast)
+on_time  = 0.15 s (fixed — long enough for the servo to fully spin up)
+off_time = 0.15 s × (1/speed − 1)   (servo.value = None → coast)
 ```
 
-The average rotation rate tracks `speed`, but every pulse is at full torque so the auger never
-stalls mid-bean. Edge cases short-circuit: `speed ≤ 0` idles (`value = None`), `speed ≥ 1` drives
-continuously. A 3-second start delay (`_sleep_interruptible(3.0)`) holds feeding until the burr
+Every pulse delivers the same kick of beans, so the average feed rate tracks `speed` linearly.
+(The earlier variable-width scheme — `on_time = speed × period` — was badly nonlinear: below
+~50 ms the servo never reached speed, and above ~50 % duty momentum carried it through the short
+gaps at nearly full speed.) Edge cases short-circuit: `speed ≤ 0` idles (`value = None`),
+`speed ≥ 0.95` drives continuously. A 3-second start delay (`_sleep_interruptible(3.0)`) holds feeding until the burr
 motor has finished its acceleration ramp, so beans are never dumped onto a not-yet-spinning burr.
 `SIGTERM` breaks every sleep immediately for a fast, drift-free stop.
 

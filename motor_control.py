@@ -67,7 +67,8 @@ DOSER_SPEED_STEP = 0.05   # 5% increments
 KNOB_HIT_RADIUS = 38   # px (real coords) - must press within this distance of knob
 KNOB_HOLD_TIME  = 0.25  # seconds to hold on knob before drag activates
 BUTTON_MAX_TAP  = 0.5  # seconds - button press longer than this is ignored
-BUTTON_RELEASE_TIMEOUT = 0.08  # 80ms — fast tap response for button
+BUTTON_RELEASE_TIMEOUT = 0.15  # 150ms — long enough for a trailing swipe-gesture event to
+                               # arrive and veto the tap (CST816T reports the gesture at lift)
 KNOB_RELEASE_TIMEOUT   = 0.50  # 500ms — CST816T can go silent 200ms+ while holding still
 MIN_SWIPE_DISTANCE = 40   # px — minimum horizontal travel to accept a swipe gesture
 BUTTON_SWIPE_CANCEL = 20  # px — if touch moves this far during button press, cancel it
@@ -406,6 +407,8 @@ def main():
     last_touch_event_time = 0
     gesture_cooldown_until = 0
     touch_start_x = 0
+    touch_start_y = 0
+    swipe_gesture_seen = False  # hardware reported a swipe during this contact
 
     draw_ui(disp, rpm, is_running=False)
 
@@ -432,6 +435,7 @@ def main():
                             last_activity_time = current_time
                             interact_state = INTERACT_IDLE
                             was_touching = False
+                            swipe_gesture_seen = False
                             redraw(disp, current_screen, rpm, doser_speed,
                                    is_running=(motor_proc is not None))
                             time.sleep(0.05)
@@ -443,6 +447,7 @@ def main():
                         if current_time < gesture_cooldown_until:
                             touch.get_gesture()
                             was_touching = False
+                            swipe_gesture_seen = False
                             continue
 
                         x, y = touch.get_point()
@@ -450,20 +455,28 @@ def main():
                         # Capture start position on first contact (before swipe check)
                         if not was_touching:
                             touch_start_x = x
+                            touch_start_y = y
 
-                        # Hardware gesture → switch screen
+                        # Hardware gesture → switch screen. Only an active knob
+                        # drag is immune: a swipe that happens to start on the
+                        # button (or knob) must never fire them instead.
                         gesture = touch.get_gesture()
-                        if (gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT)
-                                and interact_state == INTERACT_IDLE
-                                and abs(x - touch_start_x) >= MIN_SWIPE_DISTANCE):
-                            current_screen = 1 - current_screen
-                            gesture_cooldown_until = current_time + 0.4
-                            interact_state = INTERACT_IDLE
-                            was_touching = False
-                            touch_start_x = 0
-                            redraw(disp, current_screen, rpm, doser_speed,
-                                   is_running=(motor_proc is not None))
-                            continue
+                        if gesture in (GESTURE_SWIPE_LEFT, GESTURE_SWIPE_RIGHT):
+                            if interact_state != INTERACT_KNOB_ACTIVE:
+                                swipe_gesture_seen = True
+                            if (interact_state in (INTERACT_IDLE, INTERACT_BUTTON,
+                                                   INTERACT_KNOB_WAITING)
+                                    and abs(x - touch_start_x) >= MIN_SWIPE_DISTANCE):
+                                current_screen = 1 - current_screen
+                                gesture_cooldown_until = current_time + 0.4
+                                interact_state = INTERACT_IDLE
+                                was_touching = False
+                                swipe_gesture_seen = False
+                                touch_start_x = 0
+                                touch_start_y = 0
+                                redraw(disp, current_screen, rpm, doser_speed,
+                                       is_running=(motor_proc is not None))
+                                continue
 
                         # ── First contact this gesture ───────────────────────
                         if not was_touching:
@@ -488,7 +501,7 @@ def main():
                             hold_time = current_time - interact_start_time
 
                             if interact_state == INTERACT_BUTTON:
-                                if abs(x - touch_start_x) > BUTTON_SWIPE_CANCEL:
+                                if math.hypot(x - touch_start_x, y - touch_start_y) > BUTTON_SWIPE_CANCEL:
                                     interact_state = INTERACT_IDLE  # swipe-through, not a tap
 
                             elif interact_state == INTERACT_KNOB_WAITING:
@@ -516,9 +529,24 @@ def main():
                 if was_touching and (current_time - last_touch_event_time) > release_timeout:
                     hold_time = last_touch_event_time - interact_start_time
                     was_touching = False
+                    end_x, end_y = touch.get_point()
 
-                    if interact_state == INTERACT_BUTTON:
-                        if hold_time <= BUTTON_MAX_TAP:
+                    if swipe_gesture_seen and interact_state != INTERACT_KNOB_ACTIVE:
+                        # Controller reported a swipe but events were too sparse
+                        # for the mid-gesture travel check to pass — honor the
+                        # swipe at release, and never fire the button
+                        current_screen = 1 - current_screen
+                        gesture_cooldown_until = current_time + 0.4
+                        redraw(disp, current_screen, rpm, doser_speed,
+                               is_running=(motor_proc is not None))
+
+                    elif interact_state == INTERACT_BUTTON:
+                        # A tap must start AND end on the button with minimal
+                        # travel — anything else is a swipe passing through
+                        travel = math.hypot(end_x - touch_start_x, end_y - touch_start_y)
+                        if (hold_time <= BUTTON_MAX_TAP
+                                and travel <= BUTTON_SWIPE_CANCEL
+                                and is_on_button(end_x, end_y)):
                             if motor_proc is None:
                                 redraw(disp, current_screen, rpm, doser_speed, is_running=True)
                                 motor_proc = start_motor_process(rpm, disp, MOTOR_CONFIG_ID)
@@ -534,6 +562,7 @@ def main():
                                is_running=(motor_proc is not None))
 
                     interact_state = INTERACT_IDLE
+                    swipe_gesture_seen = False
 
                 # Check if either subprocess ended unexpectedly
                 unexpected_exit = (
