@@ -29,8 +29,13 @@ signal.signal(signal.SIGINT, handle_signal)
 
 def _sleep_interruptible(duration):
     end = time.monotonic() + duration
-    while time.monotonic() < end and not shutdown_requested:
-        time.sleep(0.05)
+    while not shutdown_requested:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            break
+        # Cap chunks at 50ms for shutdown responsiveness, but never oversleep —
+        # burst on-times can be as short as ~8ms at low speeds
+        time.sleep(min(0.05, remaining))
 
 def main():
     global servo

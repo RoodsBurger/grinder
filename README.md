@@ -101,7 +101,7 @@ All numbers are **BCM** GPIO numbers.
 **Buses**
 
 - **SPI bus 0** is *shared* by two devices with different requirements:
-  - LCD (GC9A01) — 80 MHz, chip-select on GPIO22, manual CS.
+  - LCD (GC9A01) — 40 MHz, chip-select on GPIO22, manual CS.
   - DRV8711 — 500 kHz, chip-select on GPIO8/`SCS`, manual CS, SPI mode 0.
   Because both sit on bus 0 they are never driven at the same time — see
   [The Shared-SPI Problem](#the-shared-spi-problem-and-the-solution).
@@ -155,7 +155,7 @@ Both the LCD and the DRV8711 live on **SPI bus 0**. Linux exposes that as a sing
 two processes cannot safely open simultaneously. The system solves this with a **cooperative
 hand-off**, not a lock:
 
-1. UI is running normally → `lcd_display` holds SPI0 open at 80 MHz to push frames.
+1. UI is running normally → `lcd_display` holds SPI0 open at 40 MHz to push frames.
 2. User presses START → before spawning `motor_only.py`, the UI calls
    `disp.close_spi_for_motor()`, which closes the LCD's `spidev` handle.
 3. `motor_only.py` opens SPI0 at 500 kHz, writes the DRV8711 registers, **then closes SPI
@@ -163,10 +163,7 @@ hand-off**, not a lock:
    actual motion is pure GPIO `STEP`/`DIR` toggling, so the bus is free again within milliseconds.
 4. User presses STOP (or a subprocess exits) → `stop_all_processes()` terminates the children,
    pulls `SLEEP` low to de-energize the driver, then calls `disp.reopen_spi_after_motor()` which
-   re-opens SPI0 at 80 MHz and the UI resumes drawing.
-
-`motor_only.py` also defensively opens-then-closes a throwaway `SpiDev(0,0)` on startup to make
-sure no stale handle is lingering before it configures the driver.
+   re-opens SPI0 at 40 MHz and the UI resumes drawing.
 
 This is why the README repeatedly warns: **never run `motor_control.py` and `motor_only.py` as
 independent simultaneous processes** — they would both grab SPI0 and fault.
@@ -212,8 +209,8 @@ trailing reads so one swipe doesn't bounce screens.
 `start_motor_process()` (closes LCD SPI, spawns `motor_only.py <rpm> M1`) and
 `start_servo_process()` (spawns `servo_only.py <0.00–1.00>`). STOP sends `SIGTERM` to **both at
 once** so they decelerate in parallel, waits up to 2 s each (then `SIGKILL`), forces `SLEEP` low,
-and reopens LCD SPI. Every loop iteration also polls both children; an unexpected exit dumps
-their stdout/stderr to the journal and resets the appliance.
+and reopens LCD SPI. Every loop iteration also polls both children; an unexpected exit tears
+both down and resets the appliance (child output streams directly to the journal).
 
 Key constants live at the top of the file: `MOTOR_CONFIG_ID = 'M1'`, `MIN_RPM/MAX_RPM = 60/300`,
 `STANDBY_TIMEOUT = 600 s`, and the geometry/colour/touch-tuning values.
@@ -269,9 +266,9 @@ A self-contained GC9A01 driver (no Waveshare lib dependency).
 - `init_display()` runs the full GC9A01 power-on register sequence, then sleep-out (`0x11`) and
   display-on (`0x29`).
 - `show_image(pil)` converts an RGB888 PIL image to **RGB565** with vectorized NumPy bit-shifts
-  (`R>>3`, `G>>2`, `B>>3`, packed into two interleaved bytes), flattens to a list **once**, sets
-  the 240×240 window, and streams it over SPI in **4096-byte chunks with CS held low for the
-  entire frame** — the single biggest throughput win on this panel.
+  (`R>>3`, `G>>2`, `B>>3`, packed into two interleaved bytes), sets the 240×240 window, and
+  streams the NumPy buffer over SPI via `writebytes2` **with CS held low for the entire frame**
+  — no Python-list conversion, the single biggest throughput win on this panel.
 - `sleep_display()` / `wake_display()` issue display-off/sleep-in (and the reverse) and toggle
   the backlight GPIO — used by the 10-minute standby.
 - `close_spi_for_motor()` / `reopen_spi_after_motor()` implement the cooperative SPI hand-off
@@ -285,7 +282,7 @@ point coordinates in one transaction.
 - `is_touched()` is a cheap GPIO read of `TP_INT` (LOW = event pending) — the main loop only does
   a (more expensive) I²C read when the interrupt line says there's something to read.
 - `read_touch()` pulls 6 bytes from register `0x01`: gesture id, finger count, and 12-bit X/Y.
-  It validates bounds (0–239, rejects `(0,0)` and `≥4095` garbage), with up to 3 retries on
+  It validates bounds (0–239, rejects `(0,0)` garbage), with up to 3 retries on
   `OSError` (I²C glitches).
 - **Jitter suppression:** a 3-sample moving average plus 5 px hysteresis (sub-threshold movement
   is pinned to the last value), a 10 ms debounce, and an internal
@@ -373,8 +370,8 @@ sudo bash install.sh
 ```
 
 Full install:
-1. Installs system + Python deps (`python3-pip python3-pil python3-numpy`, then
-   `spidev smbus2 RPi.GPIO opencv-python-headless` via pip with `--break-system-packages`).
+1. Installs system + Python deps (`python3-pip python3-pil python3-numpy python3-lgpio`, then
+   `spidev smbus2 RPi.GPIO gpiozero` via pip with `--break-system-packages`).
 2. Copies the runtime files to **`/opt/motor-control/`**.
 3. Installs and enables two systemd units, then starts them.
 
@@ -401,8 +398,9 @@ sudo systemctl restart motor-control
 journalctl -u motor-control -f
 ```
 
-> ⚠️ `wifi_setup.py` contains **hard-coded SSIDs/passwords and a gateway IP**. Edit them before
-> deploying on a different network.
+> ⚠️ WiFi credentials live in **`wifi_config.json`** next to `wifi_setup.py` (untracked by git;
+> see the format documented at the top of `wifi_setup.py`). Without that file, the script only
+> verifies existing connectivity (NetworkManager saved profiles) and cannot join new networks.
 
 ---
 

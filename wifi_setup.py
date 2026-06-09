@@ -4,24 +4,32 @@ Simple one-time network setup script.
 Runs once at boot to ensure WiFi is connected, then exits.
 """
 
+import json
+import os
 import subprocess
 import time
 import sys
 
 # --- CONFIGURATION ---
-NETWORK_CONFIG = {
-    "primary": {
-        "ssid": "Cookie Face",
-        "password": "huskydaisy483",
-    },
-    "fallback": {
-        "ssid": "Welcome to Hell",
-        "password": "ric19077",
-    }
-}
+# Credentials live in wifi_config.json next to this script (untracked, see
+# .gitignore) so they never land in the repo. Format:
+#   {"primary": {"ssid": "...", "password": "..."},
+#    "fallback": {"ssid": "...", "password": "..."}}
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wifi_config.json")
 
-GATEWAY = "192.168.86.1"
 MAX_WAIT = 60  # Maximum seconds to wait for connection
+
+
+def load_network_config():
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        log(f"WARNING: {CONFIG_PATH} not found — cannot connect to new networks")
+        return None
+    except Exception as e:
+        log(f"WARNING: bad wifi_config.json ({e})")
+        return None
 
 def log(msg):
     print(f"[wifi-setup] {msg}")
@@ -65,8 +73,15 @@ def get_wifi_status():
     return True, ssid, ip_address
 
 def ping_gateway():
-    """Ping gateway to verify connectivity"""
-    success, _, _ = run_command(['ping', '-c', '1', '-W', '3', GATEWAY], timeout=5)
+    """Ping the default gateway (from the routing table) to verify connectivity"""
+    success, stdout, _ = run_command(['ip', 'route', 'show', 'default'])
+    if not success:
+        return False
+    parts = stdout.split()
+    if 'via' not in parts:
+        return False
+    gateway = parts[parts.index('via') + 1]
+    success, _, _ = run_command(['ping', '-c', '1', '-W', '3', gateway], timeout=5)
     return success
 
 def connect_to_wifi(ssid, password):
@@ -99,6 +114,7 @@ def main():
     log("=" * 40)
 
     start_time = time.time()
+    network_config = load_network_config()
 
     # First, wait a bit for system to settle
     time.sleep(5)
@@ -110,6 +126,11 @@ def main():
         log("Setup complete!")
         return 0
 
+    if network_config is None:
+        log("No network credentials available — relying on NetworkManager saved profiles")
+        log("Continuing anyway - motor control will start without network")
+        return 1
+
     # Try to connect
     attempts = 0
     while time.time() - start_time < MAX_WAIT:
@@ -117,8 +138,8 @@ def main():
         log(f"Connection attempt {attempts}...")
 
         # Try primary network
-        if connect_to_wifi(NETWORK_CONFIG['primary']['ssid'],
-                          NETWORK_CONFIG['primary']['password']):
+        if connect_to_wifi(network_config['primary']['ssid'],
+                          network_config['primary']['password']):
             time.sleep(5)
             is_connected, ssid, ip = get_wifi_status()
             if is_connected and ping_gateway():
@@ -127,8 +148,8 @@ def main():
                 return 0
 
         # Try fallback network
-        if connect_to_wifi(NETWORK_CONFIG['fallback']['ssid'],
-                          NETWORK_CONFIG['fallback']['password']):
+        if connect_to_wifi(network_config['fallback']['ssid'],
+                          network_config['fallback']['password']):
             time.sleep(5)
             is_connected, ssid, ip = get_wifi_status()
             if is_connected and ping_gateway():

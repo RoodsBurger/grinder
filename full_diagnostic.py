@@ -93,13 +93,18 @@ def read_reg(reg):
     return ((result[0] & 0x0F) << 8) | result[1]
 
 def calculate_torque(current_ma):
+    # Fixed DRV8711 formula (matches motor_only.py, SLVSC40H eq.):
+    #   TORQUE = I_mA/1000 × 256 × ISGAIN × R_SENSE / 2.75V
+    # Highest ISGAIN tried first to maximise register resolution.
     r_sense = 0.030
-    gains = [(0, 3.3), (1, 1.65), (2, 0.825), (3, 0.4125)]
-    for gain_bits, v_ref in gains:
-        torque = int((384 * (current_ma / 1000.0) * r_sense * 2) / v_ref)
+    vref    = 2.75
+    gains = [(3, 40), (2, 20), (1, 10), (0, 5)]
+    for gain_bits, isgain in gains:
+        torque = int((current_ma / 1000.0) * 256 * isgain * r_sense / vref)
         if 0 <= torque <= 255:
             return (torque, gain_bits)
-    return (255, 3)
+    # Out of range — clamp to max register at lowest gain rather than overshoot
+    return (255, 0)
 
 # =============================================================================
 # TEST 1: GPIO PIN TEST

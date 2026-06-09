@@ -39,6 +39,8 @@ if [ "$1" == "-simple" ]; then
     cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
     cp "$SCRIPT_DIR/lcd_display.py" "$INSTALL_DIR/"
     cp "$SCRIPT_DIR/touch_screen.py" "$INSTALL_DIR/"
+    # Optional untracked WiFi credentials override
+    [ -f "$SCRIPT_DIR/wifi_config.json" ] && cp "$SCRIPT_DIR/wifi_config.json" "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR"/*.py
 
     echo ""
@@ -60,8 +62,8 @@ echo "=========================================="
 echo ""
 echo "[1/7] Installing Python dependencies..."
 apt-get update
-apt-get install -y python3-pip python3-pil python3-numpy
-pip3 install --break-system-packages spidev smbus2 RPi.GPIO opencv-python-headless
+apt-get install -y python3-pip python3-pil python3-numpy python3-lgpio
+pip3 install --break-system-packages spidev smbus2 RPi.GPIO gpiozero
 
 echo ""
 echo "[2/7] Stopping old services..."
@@ -78,10 +80,13 @@ echo ""
 echo "[4/7] Copying files..."
 cp "$SCRIPT_DIR/motor_control.py" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/motor_only.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/servo_only.py" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/motor_configs.json" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/lcd_display.py" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/touch_screen.py" "$INSTALL_DIR/"
+# Optional untracked WiFi credentials override
+[ -f "$SCRIPT_DIR/wifi_config.json" ] && cp "$SCRIPT_DIR/wifi_config.json" "$INSTALL_DIR/"
 
 chmod +x "$INSTALL_DIR"/*.py
 

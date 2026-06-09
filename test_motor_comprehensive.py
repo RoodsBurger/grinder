@@ -240,22 +240,21 @@ def calculate_torque_register(current_ma: int, isgain: int) -> tuple:
     """
     Calculate TORQUE register value and return (torque_value, ctrl_isgain_bits)
 
-    Formula: TORQUE = (384 * I_TRQ * R_SENSE * 2) / V_REF
-             where V_REF = 3.3V, R_SENSE = 0.030Ω, Gain = ISGAIN setting
+    Fixed DRV8711 formula (matches motor_only.py, SLVSC40H eq.):
+        I_TRIP = (TORQUE/256) × (2.75V / (ISGAIN × R_SENSE))
+        → TORQUE = I_mA/1000 × 256 × ISGAIN × R_SENSE / 2.75
 
-    ISGAIN encoding:
-    - 00 (0) = Gain 5  (V_REF = 3.3V)
-    - 01 (1) = Gain 10 (V_REF = 1.65V)
-    - 10 (2) = Gain 20 (V_REF = 0.825V)
-    - 11 (3) = Gain 40 (V_REF = 0.4125V)
+    ISGAIN encoding (CTRL bits 9:8): 00=5, 01=10, 10=20, 11=40.
+    Highest gain tried first to maximise register resolution. The `isgain`
+    argument is accepted for config compatibility but always auto-selected.
     """
-    # Try different gains to find best fit
     r_sense = 0.030
+    vref    = 2.75
 
-    gains = [(0, 3.3), (1, 1.65), (2, 0.825), (3, 0.4125)]
+    gains = [(3, 40), (2, 20), (1, 10), (0, 5)]
 
-    for gain_bits, v_ref in gains:
-        torque = int((384 * (current_ma / 1000.0) * r_sense * 2) / v_ref)
+    for gain_bits, isgain_mult in gains:
+        torque = int((current_ma / 1000.0) * 256 * isgain_mult * r_sense / vref)
         if 0 <= torque <= 255:
             return (torque, gain_bits)
 

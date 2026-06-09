@@ -245,7 +245,7 @@ class TouchScreen:
         """Validate coordinates are within display bounds."""
         if x < 0 or x >= 240 or y < 0 or y >= 240:
             return False, 0, 0
-        if (x == 0 and y == 0) or (x >= 4095 or y >= 4095):
+        if x == 0 and y == 0:
             return False, 0, 0
         return True, x, y
 

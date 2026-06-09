@@ -39,7 +39,10 @@ class LCD_1inch28:
 
         # Initialize SPI
         self.spi.open(self.spi_bus, self.spi_device)
-        self.spi.max_speed_hz = 80000000  # 80MHz (GC9A01 max spec)
+        # 40MHz: Waveshare's proven setting for this panel. The GC9A01 datasheet
+        # spec is only 10MHz; 80MHz over jumper wires is unreliable, and the Pi's
+        # SPI clock tracks core_freq so high requests aren't stable anyway.
+        self.spi.max_speed_hz = 40000000
         self.spi.mode = 0b00  # SPI Mode 0
         self.spi_open = True
 
@@ -76,7 +79,7 @@ class LCD_1inch28:
         if not self.spi_open:
             try:
                 self.spi.open(self.spi_bus, self.spi_device)
-                self.spi.max_speed_hz = 80000000
+                self.spi.max_speed_hz = 40000000
                 self.spi.mode = 0b00
                 self.spi_open = True
             except Exception as e:
@@ -221,21 +224,14 @@ class LCD_1inch28:
         pixel_data[:, :, 0] = high_byte
         pixel_data[:, :, 1] = low_byte
 
-        # CRITICAL FIX: Convert to list ONCE before loop (not 29 times!)
-        pixel_bytes = pixel_data.ravel().tolist()
-
         # Set window and write data
         self.set_window(0, 0, self.width, self.height)
 
-        # Write in chunks - CS stays LOW for entire transfer (efficient!)
-        chunk_size = 4096
+        # CS stays LOW for the entire transfer; writebytes2 takes the numpy
+        # array directly (no 115k-element Python list) and chunks internally
         GPIO.output(self.DC_PIN, GPIO.HIGH)  # Data mode
         GPIO.output(self.CS_PIN, GPIO.LOW)   # Select chip (once)
-
-        for i in range(0, len(pixel_bytes), chunk_size):
-            # Just slice the list (already converted)
-            self.spi.writebytes(pixel_bytes[i:i + chunk_size])
-
+        self.spi.writebytes2(pixel_data.reshape(-1))
         GPIO.output(self.CS_PIN, GPIO.HIGH)  # Deselect (once)
 
     def clear(self, color=(0, 0, 0)):

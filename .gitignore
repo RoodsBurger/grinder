@@ -24,6 +24,9 @@ Thumbs.db
 *.bak
 backup/
 
+# Secrets (deployment-specific WiFi credentials)
+wifi_config.json
+
 # Claude local
 .claude/
 memory/

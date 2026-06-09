@@ -1781,7 +1781,7 @@
   },
   "K4": {
     "id": "K4",
-    "name": "Ultra Current 8000mA @ 100kHz + 1/64 step",
+    "name": "Ultra Current 6500mA @ 100kHz + 1/64 step",
     "description": "Maximum current with ultra-high PWM and finer microstepping",
     "current_ma": 6500,
     "ctrl_base": 3120,

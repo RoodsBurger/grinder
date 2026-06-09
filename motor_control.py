@@ -20,6 +20,7 @@ SLEEP_PIN = 7
 MOTOR_CONFIG_ID = 'M1'  # Motor config from motor_configs.json (4200mA, 1/8 step, auto-mixed decay)
 MIN_RPM = 60
 MAX_RPM = 300
+RPM_SNAP = 20  # slider snaps to multiples of this
 STANDBY_TIMEOUT = 600  # 10 minutes of inactivity before display sleeps
 
 # Display Settings - Render at 2x for crispness
@@ -32,7 +33,7 @@ CENTER = (W_HIGH // 2, H_HIGH // 2)
 RADIUS_OUTER = 110 * SCALE
 RADIUS_INNER = 70 * SCALE  # Thicker slider track
 BUTTON_RADIUS = 40 * SCALE  # Button size (visual)
-BUTTON_TOUCH_RADIUS = 36  # Touch detection radius (matches visual button size)
+BUTTON_TOUCH_RADIUS = 36  # Touch detection radius (slightly tighter than the 40px visual button)
 KNOB_RADIUS = 22 * SCALE  # Bigger slider knob
 ICON_SIZE = 32 * SCALE  # Icon size (bigger)
 
@@ -152,10 +153,10 @@ def arc_to_rpm(x, y):
     if dist < 45:
         return None
     angle = get_angle(x, y)
-    eff_angle = angle if angle >= 135 else angle + 360
-    if 135 <= eff_angle <= 405:
-        ratio = (eff_angle - 135) / 270
-        return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / 20) * 20)
+    eff_angle = angle if angle >= START_ANGLE else angle + 360
+    if START_ANGLE <= eff_angle <= END_ANGLE:
+        ratio = (eff_angle - START_ANGLE) / (END_ANGLE - START_ANGLE)
+        return int(round((MIN_RPM + ratio * (MAX_RPM - MIN_RPM)) / RPM_SNAP) * RPM_SNAP)
     return None
 
 # --- DOSER SCREEN HELPERS ---
@@ -179,9 +180,9 @@ def arc_to_doser_speed(x, y):
     if math.sqrt(dx*dx + dy*dy) < 45:
         return None
     angle = get_angle(x, y)
-    eff_angle = angle if angle >= 135 else angle + 360
-    if 135 <= eff_angle <= 405:
-        ratio = (eff_angle - 135) / 270
+    eff_angle = angle if angle >= START_ANGLE else angle + 360
+    if START_ANGLE <= eff_angle <= END_ANGLE:
+        ratio = (eff_angle - START_ANGLE) / (END_ANGLE - START_ANGLE)
         snapped = round(ratio / DOSER_SPEED_STEP) * DOSER_SPEED_STEP
         return max(MIN_DOSER_SPEED, min(MAX_DOSER_SPEED, snapped))
     return None
@@ -322,23 +323,15 @@ def start_motor_process(rpm, disp, config_id='M1'):
     disp.close_spi_for_motor()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     motor_script = os.path.join(script_dir, "motor_only.py")
-    return subprocess.Popen(
-        ["python3", motor_script, str(rpm), config_id],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
+    # stdout/stderr inherited so subprocess output lands in the journal/terminal
+    # (PIPE would fill up unread and risk blocking the child)
+    return subprocess.Popen(["python3", motor_script, str(rpm), config_id])
 
 def start_servo_process(doser_speed):
     """Start doser servo at given speed (0.0–1.0)."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     servo_script = os.path.join(script_dir, "servo_only.py")
-    return subprocess.Popen(
-        ["python3", servo_script, f"{doser_speed:.2f}"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
+    return subprocess.Popen(["python3", servo_script, f"{doser_speed:.2f}"])
 
 def _terminate(proc):
     """Terminate a subprocess gracefully."""
@@ -549,18 +542,11 @@ def main():
                 )
                 if unexpected_exit:
                     print("WARNING: subprocess exited unexpectedly — stopping both")
+                    # Stop both BEFORE inspecting them — never block on a live process
+                    stop_all_processes(motor_proc, servo_proc, disp)
                     for proc, name in ((motor_proc, "motor"), (servo_proc, "servo")):
                         if proc:
                             print(f"  [{name}] exit={proc.returncode}")
-                            try:
-                                out = proc.stdout.read()
-                                err = proc.stderr.read()
-                                if out: print(f"  [{name}] stdout: {out}")
-                                if err: print(f"  [{name}] stderr: {err}")
-                            except:
-                                pass
-
-                    stop_all_processes(motor_proc, servo_proc, disp)
                     motor_proc = None
                     servo_proc = None
 

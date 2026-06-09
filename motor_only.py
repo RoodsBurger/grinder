@@ -4,7 +4,7 @@ Standalone motor control - runs in separate process
 No display, no touch - just motor operation
 
 MOTOR CONFIGURATION: Loaded from motor_configs.json
-- Defaults to M1 (NEMA 23, 1/8 step, 3500mA) if no config specified
+- Defaults to M1 (NEMA 23, 1/8 step, 4200mA) if no config specified
 - Can load any config by passing config ID as argument
 
 Usage:
@@ -58,7 +58,8 @@ def load_motor_config(config_id='M1'):
 
     if config_id not in configs:
         print(f"ERROR: Config '{config_id}' not found")
-        print(f"Available: {', '.join(sorted(configs.keys()))}")
+        available = [k for k in sorted(configs.keys()) if not k.startswith('_')]
+        print(f"Available: {', '.join(available)}")
         sys.exit(1)
 
     return configs[config_id]
@@ -147,17 +148,6 @@ def run_motor(target_rpm, config_id='M1'):
     GPIO.output(DIR_PIN, GPIO.LOW)
     GPIO.output(SLEEP_PIN, GPIO.LOW)
 
-    # Ensure SPI is closed before opening
-    try:
-        spi_test = spidev.SpiDev()
-        try:
-            spi_test.open(0, 0)
-            spi_test.close()
-        except:
-            pass
-    except:
-        pass
-
     # Initialize SPI
     init_spi()
 
@@ -191,7 +181,12 @@ def run_motor(target_rpm, config_id='M1'):
     steps_rev  = 200
     microsteps = motor_config['microstep_divider']
     steps_per_sec_target = (target_rpm * steps_rev * microsteps) / 60.0
-    cruise_delay = 1.0 / steps_per_sec_target if steps_per_sec_target > 0 else 0.01
+    if steps_per_sec_target <= 0:
+        print("ERROR: RPM must be positive — refusing to step")
+        GPIO.output(SLEEP_PIN, GPIO.LOW)
+        close_spi()
+        sys.exit(1)
+    cruise_delay = 1.0 / steps_per_sec_target
 
     # Acceleration ramp: linear from 15% → 100% of target speed over RAMP_TIME seconds
     RAMP_TIME           = 1.5   # seconds to reach full speed
@@ -236,7 +231,7 @@ if __name__ == "__main__":
         print("Usage: motor_only.py <RPM> [CONFIG_ID]")
         print("")
         print("Arguments:")
-        print("  RPM        - Target speed (0-400)")
+        print("  RPM        - Target speed (1-300)")
         print("  CONFIG_ID  - Motor configuration ID (default: M1)")
         print("")
         print("Examples:")
@@ -248,8 +243,8 @@ if __name__ == "__main__":
     try:
         # Parse RPM
         rpm = int(sys.argv[1])
-        if rpm < 0 or rpm > 400:
-            print("ERROR: RPM must be 0-400")
+        if rpm < 1 or rpm > 300:
+            print("ERROR: RPM must be 1-300")
             sys.exit(1)
 
         # Parse optional config ID (default to M1)
