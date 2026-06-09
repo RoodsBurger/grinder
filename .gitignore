@@ -23,3 +23,7 @@ Thumbs.db
 *.tmp
 *.bak
 backup/
+
+# Claude local
+.claude/
+memory/

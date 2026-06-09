@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# Simple Install Script for Motor Control + WiFi Setup
+# Install Script for Motor Control + WiFi Setup
 # Run as root: sudo bash install.sh
+#
+# Flags:
+#   (none)   Full install: deps, copy files, services
+#   -simple  Just restart services (no install, no file copy)
 #
 
 set -e
-
-echo "=========================================="
-echo "Motor Control + WiFi Setup Installer"
-echo "=========================================="
 
 if [ "$EUID" -ne 0 ]; then
     echo "ERROR: Please run as root (sudo bash install.sh)"
@@ -17,6 +17,45 @@ fi
 
 INSTALL_DIR="/opt/motor-control"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- SIMPLE MODE: copy files and restart services (no dependency install) ---
+if [ "$1" == "-simple" ]; then
+    echo "=========================================="
+    echo "Quick Deploy (copy files + restart)"
+    echo "=========================================="
+
+    echo ""
+    echo "[1/3] Stopping services..."
+    systemctl stop motor-control.service 2>/dev/null || true
+    systemctl stop wifi-setup.service 2>/dev/null || true
+
+    echo ""
+    echo "[2/3] Copying files..."
+    mkdir -p "$INSTALL_DIR"
+    cp "$SCRIPT_DIR/motor_control.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/motor_only.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/servo_only.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/motor_configs.json" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/wifi_setup.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/lcd_display.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/touch_screen.py" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR"/*.py
+
+    echo ""
+    echo "[3/3] Starting services..."
+    systemctl start wifi-setup.service
+    systemctl start motor-control.service
+
+    echo ""
+    echo "Done. View logs: journalctl -u motor-control -f"
+    echo ""
+    exit 0
+fi
+
+# --- FULL INSTALL ---
+echo "=========================================="
+echo "Motor Control + WiFi Setup Installer"
+echo "=========================================="
 
 echo ""
 echo "[1/7] Installing Python dependencies..."
@@ -61,8 +100,6 @@ echo ""
 echo "[7/7] Starting services..."
 systemctl start wifi-setup.service
 systemctl start motor-control.service
-# sudo systemctl stop motor-control.service
-
 
 echo ""
 echo "=========================================="
