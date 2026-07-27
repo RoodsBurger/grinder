@@ -1,10 +1,10 @@
 # Smart Coffee Grinder Controller
 
-A Raspberry Pi–based controller for a motorized espresso grinder. It replaces the grinder's
-original switch with a **1.28" circular touchscreen**, drives the grinding burr motor through a
-high-power **DRV8711 stepper driver**, meters beans with a **continuous-rotation auger (doser)
-servo**, and boots straight into the UI as a **systemd-managed appliance** — no keyboard, mouse,
-or login required.
+A Raspberry Pi–based controller that automates a manual hand grinder. It drives the grinding
+burr through a high-power **DRV8711 stepper driver** on a **custom PCB**, meters beans with a
+**continuous-rotation auger (doser) servo**, is operated entirely from a **1.28" circular
+touchscreen**, and boots straight into the UI as a **systemd-managed appliance** — no keyboard,
+mouse, or login required.
 
 This document explains *what the system is*, *how it is built*, and *how every part actually
 works* — down to the register math on the motor driver and the cooperative SPI-bus arbitration
@@ -37,8 +37,8 @@ between the screen and the motor.
 
 ## Concept & Behaviour
 
-The grinder is operated entirely through one round screen mounted where the original control
-knob used to be. There are **two screens**, switched by a horizontal swipe:
+The grinder is operated entirely through one round screen mounted on the body. There are
+**two screens**, switched by a horizontal swipe:
 
 | Screen | Theme | What it controls | On-screen label |
 |---|---|---|---|
@@ -70,13 +70,18 @@ any touch wakes it.
 | Component | Model / Spec |
 |---|---|
 | Controller | Raspberry Pi (any 40-pin GPIO model) |
+| Board | **Custom PCB** carrying the stepper drive and the Pi/servo/display headers |
+| Grinder | Manual hand grinder, motorised — the burr is driven in place of the crank |
 | Display | 1.28" round IPS LCD, 240×240, **GC9A01** driver, SPI |
 | Touch | **CST816T** capacitive controller, I²C @ `0x15` |
 | Burr motor | NEMA 23 stepper — 4.2 A rated, 3.0 N·m, 0.9 Ω, 3.8 mH, 1.8°/step (200 steps/rev) |
-| Motor driver | Pololu **High-Power Stepper Driver 36v4** (TI **DRV8711** + MOSFET stage, 8 A capable) |
-| Sense resistor | 30 mΩ (on the 36v4 board — drives the TORQUE math) |
+| Motor driver | TI **DRV8711** + MOSFET stage, 8 A capable |
+| Sense resistor | 30 mΩ — drives the TORQUE math |
 | Reduction | 2:1 gearbox between motor and burr |
 | Doser | 360° continuous-rotation servo (MG90S-class) driving a bean auger |
+
+> Earlier revisions used a Pololu **High-Power Stepper Driver 36v4** breakout for the DRV8711
+> stage. The register math below is unchanged — same driver, same 30 mΩ sense resistor.
 
 ---
 
@@ -336,7 +341,7 @@ Each entry:
 ```
 
 **Active production config: `M1`** — NEMA 23, 1/8 microstepping, auto-mixed decay,
-**4200 mA** (100 % of the motor's rated current; the 36v4 board can deliver up to 8 A).
+**4200 mA** (100 % of the motor's rated current; the drive stage is rated to 8 A).
 
 **The TORQUE / ISGAIN math.** The DRV8711 sets the per-coil current trip point from the `TORQUE`
 register and the current-sense amplifier gain `ISGAIN`:
@@ -347,7 +352,7 @@ I_TRIP = (TORQUE / 256) × (V_REF / (ISGAIN × R_SENSE))
 ⇒  TORQUE = (I_mA / 1000) × 256 × ISGAIN × R_SENSE / V_REF
 ```
 
-with `R_SENSE = 0.030 Ω` and `V_REF = 2.75 V` on the 36v4. `calculate_torque_register()` tries
+with `R_SENSE = 0.030 Ω` and `V_REF = 2.75 V`. `calculate_torque_register()` tries
 ISGAIN values **highest first** — 40×, 20×, 10×, 5× — and keeps the first that yields a `TORQUE`
 in the valid `0–255` range. Highest gain first maximizes register resolution for a given target
 current. The selected gain bits are then patched into `ctrl_base` at runtime (the JSON only
